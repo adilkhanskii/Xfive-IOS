@@ -22,6 +22,8 @@ jobs:
       ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
       ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
       ASC_API_KEY_BASE64: ${{ secrets.ASC_API_KEY_BASE64 }}
+      X5_APP_REVIEW_EMAIL: ${{ secrets.X5_APP_REVIEW_EMAIL }}
+      X5_APP_REVIEW_PASSWORD: ${{ secrets.X5_APP_REVIEW_PASSWORD }}
 
     steps:
       - name: Checkout
@@ -34,9 +36,15 @@ jobs:
           bundler-cache: false
 
       - name: Install fastlane
-        run: gem install fastlane -N
+        run: gem install fastlane -v 2.237.0 -N
+
+      - name: Verify synthetic parser contract without Apple
+        run: ruby -e "gem 'fastlane', '=2.237.0'; load 'scripts/test_fastlane_review_secrets.rb'"
+
+      - name: Require review credentials before Apple mutations
+        run: ruby -r ./fastlane/review_credentials.rb -e "required_review_credentials"
 
       - name: Run fastlane
         run: |
           cd "$GITHUB_WORKSPACE"
-          fastlane ios ${{ inputs.action || 'upload' }}
+          fastlane _2.237.0_ ios ${{ inputs.action || 'upload' }}
