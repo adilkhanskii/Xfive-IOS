@@ -32,6 +32,7 @@ on:
       - "supabase/functions/create-course-video-upload/**"
       - "supabase/functions/course-video-playback/**"
       - "supabase/functions/course-video-status/**"
+      - "supabase/functions/course-video-bunny-mirror/**"
       - "supabase/functions/_shared/bunny-stream.mjs"
       - "supabase/drafts/**"
       - "supabase/functions/startup-chat/**"
@@ -332,10 +333,13 @@ jobs:
           deno check supabase/functions/create-course-video-upload/index.ts
           deno check supabase/functions/course-video-playback/index.ts
           deno check supabase/functions/course-video-status/index.ts
+          deno check supabase/functions/course-video-bunny-mirror/index.ts
+          deno lint supabase/functions/course-video-bunny-mirror
+          deno fmt --check supabase/functions/course-video-bunny-mirror
           node --test \
             supabase/functions/create-course-video-upload/*.test.mjs \
             supabase/functions/course-video-playback/*.test.mjs \
-            supabase/functions/course-video-status/*.test.mjs
+            supabase/functions/course-video-status/*.test.mjs             supabase/functions/course-video-bunny-mirror/*.test.mjs
 
       - name: Verify release automation contracts
         run: python3 -m unittest discover -s scripts/tests -p "test_*.py"
