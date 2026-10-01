@@ -30,6 +30,10 @@ on:
       - "supabase/functions/account-deletion-cleanup/**"
       - "supabase/config.toml"
       - "supabase/functions/create-course-video-upload/**"
+      - "supabase/functions/course-video-playback/**"
+      - "supabase/functions/course-video-status/**"
+      - "supabase/functions/_shared/bunny-stream.mjs"
+      - "supabase/drafts/**"
       - "supabase/functions/startup-chat/**"
       - "supabase/functions/fruit-story/**"
       - "supabase/tests/image_generation_reliability_contract_test.mjs"
@@ -37,7 +41,6 @@ on:
       - "supabase/tests/video_generation_openai_provider_contract_test.mjs"
       - "supabase/tests/voice_generation_backend_contract_test.mjs"
       - "supabase/tests/20260726_voice_generation_exact_once_test.sql"
-      - "supabase/tests/course_video_upload_slot_contract_test.mjs"
       - "supabase/tests/startup_chat_backend_contract_test.mjs"
       - "supabase/tests/startup_chat_rate_limit_contract_test.mjs"
       - "supabase/tests/fruit_story_backend_contract_test.mjs"
@@ -322,14 +325,17 @@ jobs:
             supabase/tests/startup_chat_rate_limit_contract_test.mjs \
             supabase/tests/fruit_story_backend_contract_test.mjs
 
-      - name: Verify quarantined Bunny course video source
+      - name: Verify Bunny Stream course video functions
         run: |
-          deno fmt --check supabase/functions/create-course-video-upload
-          deno lint supabase/functions/create-course-video-upload
+          deno fmt --check supabase/functions/create-course-video-upload supabase/functions/course-video-playback supabase/functions/course-video-status supabase/functions/_shared/bunny-stream.mjs
+          deno lint supabase/functions/create-course-video-upload supabase/functions/course-video-playback supabase/functions/course-video-status supabase/functions/_shared/bunny-stream.mjs
           deno check supabase/functions/create-course-video-upload/index.ts
+          deno check supabase/functions/course-video-playback/index.ts
+          deno check supabase/functions/course-video-status/index.ts
           node --test \
             supabase/functions/create-course-video-upload/*.test.mjs \
-            supabase/tests/course_video_upload_slot_contract_test.mjs
+            supabase/functions/course-video-playback/*.test.mjs \
+            supabase/functions/course-video-status/*.test.mjs
 
       - name: Verify release automation contracts
         run: python3 -m unittest discover -s scripts/tests -p "test_*.py"

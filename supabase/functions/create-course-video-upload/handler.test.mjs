@@ -2,423 +2,303 @@
 // Async stubs deliberately model the production network/RPC dependency shape.
 import assert from "node:assert/strict";
 import test from "node:test";
+import {
+  BUNNY_STREAM_TUS_ENDPOINT,
+  handleCreateCourseVideoUpload,
+} from "./handler.mjs";
 
-const moduleURL = new URL("./handler.mjs", import.meta.url);
-let backend;
-try {
-  backend = await import(moduleURL);
-} catch {
-  backend = null;
+const USER = "11111111-1111-4111-8111-111111111111";
+const COURSE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const VIDEO = "123e4567-e89b-42d3-a456-426614174000";
+const LEASE = "99999999-9999-4999-8999-999999999999";
+const API_KEY = "server-only-bunny-api-key";
+
+function validBody(overrides = {}) {
+  return {
+    course_id: COURSE,
+    lesson_id: "lesson_E43F20F8-B2C6-4838-9E81-202864717743",
+    upload_key: "lv_0123456789abcdef",
+    title: "Course lesson",
+    file_name: "lesson.mov",
+    content_type: "video/quicktime",
+    source_bytes: 8 * 1024 * 1024 * 1024,
+    ...overrides,
+  };
 }
 
-test("course video upload handler exists", () => {
-  assert.ok(
-    backend,
-    "create-course-video-upload handler must be implemented",
-  );
-});
-
-test("release gate defaults closed before auth, RPC, or Bunny calls", async () => {
-  assert.ok(backend);
-  let verified = false;
-  let claimed = false;
-  let bunnyCalled = false;
-  const response = await backend.handleCreateCourseVideoUpload(
-    request(validBody()),
-    dependencies({
-      releaseEnabled: undefined,
-      verifyUser: async () => {
-        verified = true;
-        return null;
-      },
-      claimUpload: async () => {
-        claimed = true;
-        return null;
-      },
-      fetchImpl: async () => {
-        bunnyCalled = true;
-        throw new Error("unexpected");
-      },
-    }),
-  );
-  const payload = await response.json();
-
-  assert.equal(response.status, 503);
-  assert.deepEqual(payload, { error: "video_upload_unavailable" });
-  assert.equal(verified, false);
-  assert.equal(claimed, false);
-  assert.equal(bunnyCalled, false);
-});
-
-test("rejects a missing bearer token before authorization or Bunny calls", async () => {
-  assert.ok(backend);
-  let verified = false;
-  let bunnyCalled = false;
-  const response = await backend.handleCreateCourseVideoUpload(
-    new Request(
-      "https://example.test/functions/v1/create-course-video-upload",
-      {
-        method: "POST",
-        body: JSON.stringify(validBody()),
-      },
-    ),
-    dependencies({
-      verifyUser: async () => {
-        verified = true;
-        return null;
-      },
-      fetchImpl: async () => {
-        bunnyCalled = true;
-        throw new Error("unexpected");
-      },
-    }),
-  );
-
-  assert.equal(response.status, 401);
-  assert.equal(verified, false);
-  assert.equal(bunnyCalled, false);
-});
-
-test("requires both the exact immutable account allowlist and the server RPC", async () => {
-  assert.ok(backend);
-  let bunnyCalled = false;
-  const response = await backend.handleCreateCourseVideoUpload(
-    request(validBody()),
-    dependencies({
-      verifyUser: async () => ({
-        id: "9ae99a45-91ac-486a-b7ec-e6614b7bc257",
-      }),
-      isDeveloper: async () => true,
-      fetchImpl: async () => {
-        bunnyCalled = true;
-        throw new Error("unexpected");
-      },
-    }),
-  );
-
-  assert.equal(response.status, 403);
-  assert.equal(bunnyCalled, false);
-});
-
-test("fails closed when the exact account is not approved by server RPC", async () => {
-  assert.ok(backend);
-  const response = await backend.handleCreateCourseVideoUpload(
-    request(validBody()),
-    dependencies({
-      verifyUser: async () => ({
-        id: "f3eea23f-0aeb-405b-ab35-2c53173b7a8f",
-      }),
-      isDeveloper: async () => false,
-    }),
-  );
-
-  assert.equal(response.status, 403);
-});
-
-test("future opt-in source can claim an owner submission slot", async () => {
-  assert.ok(backend);
-  let developerGateCalled = false;
-  let claimed;
-  const response = await backend.handleCreateCourseVideoUpload(
-    request({
-      ...validBody(),
-      purpose: "course_submission",
-      resource_id: "submission-draft-42",
-    }),
-    dependencies({
-      verifyUser: async () => ({
-        id: "9ae99a45-91ac-486a-b7ec-e6614b7bc257",
-      }),
-      isDeveloper: async () => {
-        developerGateCalled = true;
-        return false;
-      },
-      claimUpload: async (authorization, input) => {
-        claimed = { authorization, input };
-        return {
-          status: "claimed",
-          lease_token: "123e4567-e89b-42d3-a456-426614174001",
-        };
-      },
-      fetchImpl: async () =>
-        Response.json({
-          guid: "123e4567-e89b-42d3-a456-426614174000",
-        }),
-    }),
-  );
-
-  assert.equal(response.status, 200);
-  assert.equal(developerGateCalled, false);
-  assert.equal(claimed.input.purpose, "course_submission");
-  assert.equal(
-    claimed.input.userID,
-    "9ae99a45-91ac-486a-b7ec-e6614b7bc257",
-  );
-});
-
-test("returns safe 503 before Bunny when server credentials are missing", async () => {
-  assert.ok(backend);
-  let bunnyCalled = false;
-  const response = await backend.handleCreateCourseVideoUpload(
-    request(validBody()),
-    dependencies({
-      env: {
-        BUNNY_STREAM_LIBRARY_ID: "",
-        BUNNY_STREAM_API_KEY: "",
-        BUNNY_STREAM_CDN_HOSTNAME: "",
-      },
-      fetchImpl: async () => {
-        bunnyCalled = true;
-        throw new Error("unexpected");
-      },
-    }),
-  );
-  const payload = await response.json();
-
-  assert.equal(response.status, 503);
-  assert.equal(payload.error, "video_upload_unavailable");
-  assert.equal(JSON.stringify(payload).includes("BUNNY_STREAM"), false);
-  assert.equal(bunnyCalled, false);
-});
-
-test("rejects a non-Bunny CDN hostname before creating a video", async () => {
-  assert.ok(backend);
-  let bunnyCalled = false;
-  const response = await backend.handleCreateCourseVideoUpload(
-    request(validBody()),
-    dependencies({
-      env: {
-        BUNNY_STREAM_LIBRARY_ID: "321",
-        BUNNY_STREAM_API_KEY: "test-stream-key",
-        BUNNY_STREAM_CDN_HOSTNAME: "media.example.com",
-      },
-      fetchImpl: async () => {
-        bunnyCalled = true;
-        throw new Error("unexpected");
-      },
-    }),
-  );
-
-  assert.equal(response.status, 503);
-  assert.equal(bunnyCalled, false);
-});
-
-test("future opt-in source builds the provider TUS contract", async () => {
-  assert.ok(backend);
-  const requests = [];
-  const response = await backend.handleCreateCourseVideoUpload(
-    request(validBody()),
-    dependencies({
-      fetchImpl: async (url, init) => {
-        requests.push({ url: String(url), init });
-        return Response.json({
-          guid: "123e4567-e89b-42d3-a456-426614174000",
-          libraryId: 321,
-          title: "Course lesson",
-        });
-      },
-    }),
-  );
-  const payload = await response.json();
-  const expectedSignature = await sha256Hex(
-    "321test-stream-key1900086400123e4567-e89b-42d3-a456-426614174000",
-  );
-
-  assert.equal(response.status, 200);
-  assert.equal(requests.length, 1);
-  assert.equal(
-    requests[0].url,
-    "https://video.bunnycdn.com/library/321/videos",
-  );
-  assert.equal(requests[0].init.method, "POST");
-  assert.equal(requests[0].init.headers.AccessKey, "test-stream-key");
-  assert.deepEqual(JSON.parse(requests[0].init.body), {
-    title:
-      "X5 lesson_video f3eea23f-0aeb-405b-ab35-2c53173b7a8f 0123456789abcdef0123456789abcdef course-1-lesson-1",
-  });
-  assert.equal(payload.tus_endpoint, "https://video.bunnycdn.com/tusupload");
-  assert.equal(payload.video_id, "123e4567-e89b-42d3-a456-426614174000");
-  assert.equal(payload.library_id, "321");
-  assert.equal(payload.authorization_expire, 1_900_086_400);
-  assert.equal(payload.authorization_signature, expectedSignature);
-  assert.deepEqual(payload.upload_headers, {
-    AuthorizationSignature: expectedSignature,
-    AuthorizationExpire: "1900086400",
-    LibraryId: "321",
-    VideoId: "123e4567-e89b-42d3-a456-426614174000",
-  });
-  assert.equal(
-    payload.playback_url,
-    "https://x5-stream.b-cdn.net/123e4567-e89b-42d3-a456-426614174000/playlist.m3u8",
-  );
-  assert.equal("embed_url" in payload, false);
-});
-
-test("future opt-in source replays an owned slot without another object", async () => {
-  assert.ok(backend);
-  let bunnyCalled = false;
-  const response = await backend.handleCreateCourseVideoUpload(
-    request(validBody()),
-    dependencies({
-      claimUpload: async () => ({
-        status: "replay",
-        video_id: "123e4567-e89b-42d3-a456-426614174000",
-      }),
-      fetchImpl: async () => {
-        bunnyCalled = true;
-        throw new Error("unexpected");
-      },
-    }),
-  );
-  const payload = await response.json();
-
-  assert.equal(response.status, 200);
-  assert.equal(bunnyCalled, false);
-  assert.equal(payload.video_id, "123e4567-e89b-42d3-a456-426614174000");
-});
-
-test("future opt-in source reconciles an ambiguous create by exact title", async () => {
-  assert.ok(backend);
-  const requests = [];
-  const response = await backend.handleCreateCourseVideoUpload(
-    request(validBody()),
-    dependencies({
-      fetchImpl: async (url, init) => {
-        requests.push({ url: String(url), init });
-        if (init.method === "POST") {
-          throw new TypeError("connection closed after request body");
-        }
-        return Response.json({
-          items: [{
-            guid: "123e4567-e89b-42d3-a456-426614174000",
-            title:
-              "X5 lesson_video f3eea23f-0aeb-405b-ab35-2c53173b7a8f 0123456789abcdef0123456789abcdef course-1-lesson-1",
-          }],
-        });
-      },
-    }),
-  );
-  const payload = await response.json();
-
-  assert.equal(response.status, 200);
-  assert.equal(payload.video_id, "123e4567-e89b-42d3-a456-426614174000");
-  assert.equal(
-    requests.filter((entry) => entry.init.method === "POST").length,
-    1,
-  );
-  assert.equal(
-    requests.filter((entry) => entry.init.method === "GET").length,
-    1,
-  );
-});
-
-test("future opt-in source never duplicates a reclaimed ambiguous slot", async () => {
-  assert.ok(backend);
-  const requests = [];
-  const response = await backend.handleCreateCourseVideoUpload(
-    request(validBody()),
-    dependencies({
-      claimUpload: async () => ({
-        status: "claimed",
-        reclaimed: true,
-      }),
-      fetchImpl: async (url, init) => {
-        requests.push({ url: String(url), init });
-        return Response.json({ items: [] });
-      },
-    }),
-  );
-
-  assert.equal(response.status, 503);
-  assert.equal(
-    requests.filter((entry) => entry.init.method === "POST").length,
-    0,
-  );
-  assert.equal(
-    requests.filter((entry) => entry.init.method === "GET").length,
-    1,
-  );
-});
-
-test("does not expose the Bunny key when video creation fails", async () => {
-  assert.ok(backend);
-  const response = await backend.handleCreateCourseVideoUpload(
-    request(validBody()),
-    dependencies({
-      fetchImpl: async () =>
-        new Response(
-          JSON.stringify({ message: "provider saw test-stream-key" }),
-          { status: 502 },
-        ),
-    }),
-  );
-  const text = await response.text();
-
-  assert.equal(response.status, 502);
-  assert.equal(text.includes("test-stream-key"), false);
-  assert.match(text, /video_upload_unavailable/);
-});
-
-function request(body) {
+function request(body, headers = { Authorization: "Bearer user-jwt" }) {
   return new Request(
     "https://example.test/functions/v1/create-course-video-upload",
     {
       method: "POST",
-      headers: {
-        Authorization: "Bearer developer-token",
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json", ...headers },
       body: JSON.stringify(body),
     },
   );
 }
 
-function validBody() {
-  return {
-    purpose: "lesson_video",
-    upload_key: "0123456789abcdef0123456789abcdef",
-    resource_id: "course-1-lesson-1",
-    title: "Course lesson",
-    file_name: "lesson.mov",
-    content_type: "video/quicktime",
-    source_bytes: 1_073_741_824,
-  };
-}
-
 function dependencies(overrides = {}) {
-  return {
-    // Tests below exercise dormant source explicitly. Production index.ts
-    // passes a hard-coded false release gate.
-    releaseEnabled: true,
+  const calls = { rpc: [], fetch: [] };
+  const deps = {
     env: {
-      BUNNY_STREAM_LIBRARY_ID: "321",
-      BUNNY_STREAM_API_KEY: "test-stream-key",
-      BUNNY_STREAM_CDN_HOSTNAME: "x5-stream.b-cdn.net",
+      BUNNY_STREAM_LIBRARY_ID: "625830",
+      BUNNY_STREAM_API_KEY: API_KEY,
+      BUNNY_STREAM_CDN_HOSTNAME: "vz-test.b-cdn.net",
+      BUNNY_STREAM_TOKEN_KEY: "token-key",
     },
     now: () => 1_900_000_000_000,
-    verifyUser: async () => ({
-      id: "f3eea23f-0aeb-405b-ab35-2c53173b7a8f",
-    }),
-    isDeveloper: async () => true,
-    claimUpload: async () => ({
-      status: "claimed",
-      lease_token: "123e4567-e89b-42d3-a456-426614174001",
-    }),
-    completeUpload: async () => ({ status: "completed" }),
-    randomUUID: () => "123e4567-e89b-42d3-a456-426614174001",
-    fetchImpl: async () => {
-      throw new Error("unexpected Bunny request");
+    verifyUser: async () => ({ id: USER }),
+    randomUUID: () => LEASE,
+    logger: { error() {}, warn() {} },
+    rpc: async (name, params) => {
+      calls.rpc.push({ name, params });
+      if (name === "course_video_claim_upload") {
+        return { status: "claimed", reclaimed: false };
+      }
+      if (name === "course_video_complete_upload") {
+        return { status: "completed", video_id: params.p_video_id };
+      }
+      return null;
+    },
+    fetchImpl: async (url, init) => {
+      calls.fetch.push({ url: String(url), init });
+      return new Response(JSON.stringify({ guid: VIDEO }), { status: 200 });
     },
     ...overrides,
   };
+  return { deps, calls };
 }
 
-async function sha256Hex(value) {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value),
+test("rejects missing bearer before any RPC or Bunny call", async () => {
+  const { deps, calls } = dependencies();
+  const response = await handleCreateCourseVideoUpload(
+    request(validBody(), {}),
+    deps,
   );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
+  assert.equal(response.status, 401);
+  assert.equal(calls.rpc.length, 0);
+  assert.equal(calls.fetch.length, 0);
+});
+
+test("rejects an unverifiable JWT", async () => {
+  const { deps, calls } = dependencies({ verifyUser: async () => null });
+  const response = await handleCreateCourseVideoUpload(
+    request(validBody()),
+    deps,
+  );
+  assert.equal(response.status, 401);
+  assert.equal(calls.rpc.length, 0);
+});
+
+test("validates the body before the broker", async () => {
+  const { deps, calls } = dependencies();
+  for (
+    const bad of [
+      { course_id: "not-a-uuid" },
+      { lesson_id: "bad lesson id" },
+      { upload_key: "short" },
+      { content_type: "image/png" },
+      { source_bytes: 0 },
+      { source_bytes: 50 * 1024 * 1024 * 1024 },
+    ]
+  ) {
+    const response = await handleCreateCourseVideoUpload(
+      request(validBody(bad)),
+      deps,
+    );
+    assert.equal(response.status, 400, JSON.stringify(bad));
+  }
+  assert.equal(calls.rpc.length, 0);
+});
+
+test("missing Bunny config answers 503 without calling the broker", async () => {
+  const { deps, calls } = dependencies({ env: {} });
+  const response = await handleCreateCourseVideoUpload(
+    request(validBody()),
+    deps,
+  );
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), {
+    error: "video_upload_unavailable",
+  });
+  assert.equal(calls.rpc.length, 0);
+});
+
+test("broker passes the verified user id; disabled flag maps to 503", async () => {
+  const { deps, calls } = dependencies({
+    rpc: async (name, params) => {
+      calls.rpc.push({ name, params });
+      return { status: "disabled" };
+    },
+  });
+  const response = await handleCreateCourseVideoUpload(
+    request(validBody()),
+    deps,
+  );
+  assert.equal(response.status, 503);
+  assert.equal(calls.rpc[0].name, "course_video_claim_upload");
+  assert.equal(calls.rpc[0].params.p_user_id, USER);
+  assert.equal(calls.rpc[0].params.p_course_id, COURSE);
+  assert.equal(calls.fetch.length, 0);
+});
+
+test("non-author is refused with 403 and no Bunny object is created", async () => {
+  for (const status of ["not_authorized", "course_unavailable"]) {
+    const { deps, calls } = dependencies({
+      rpc: async () => ({ status }),
+    });
+    const response = await handleCreateCourseVideoUpload(
+      request(validBody()),
+      deps,
+    );
+    assert.equal(response.status, 403);
+    assert.equal(calls.fetch.length, 0);
+  }
+});
+
+test("claimed slot creates a Bunny video and returns a TUS signature only", async () => {
+  const { deps, calls } = dependencies();
+  const response = await handleCreateCourseVideoUpload(
+    request(validBody()),
+    deps,
+  );
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.tus_endpoint, BUNNY_STREAM_TUS_ENDPOINT);
+  assert.equal(payload.video_id, VIDEO);
+  assert.equal(payload.library_id, "625830");
+  assert.equal(payload.upload_required, true);
+  assert.match(payload.authorization_signature, /^[0-9a-f]{64}$/);
+  assert.equal(payload.authorization_expire, 1_900_000_000 + 24 * 60 * 60);
+  assert.equal(payload.upload_headers.VideoId, VIDEO);
+  // never a playable/public URL, never the API key
+  assert.equal(payload.playback_url, undefined);
+  assert.ok(!JSON.stringify(payload).includes(API_KEY));
+  assert.equal(calls.fetch.length, 1);
+  assert.equal(calls.fetch[0].init.headers.AccessKey, API_KEY);
+  assert.equal(calls.rpc[1].name, "course_video_complete_upload");
+  assert.equal(calls.rpc[1].params.p_video_id, VIDEO);
+  assert.equal(calls.rpc[1].params.p_lease_token, LEASE);
+});
+
+test("signature matches Bunny's sha256(library + key + expire + video)", async () => {
+  const { deps } = dependencies();
+  const payload = await (await handleCreateCourseVideoUpload(
+    request(validBody()),
+    deps,
+  )).json();
+  const expected = Array.from(
+    new Uint8Array(
+      await crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode(
+          `625830${API_KEY}${payload.authorization_expire}${VIDEO}`,
+        ),
+      ),
+    ),
+  ).map((b) => b.toString(16).padStart(2, "0")).join("");
+  assert.equal(payload.authorization_signature, expected);
+});
+
+test("replay re-signs the same video without creating another", async () => {
+  const { deps, calls } = dependencies({
+    rpc: async (name) => {
+      calls.rpc.push({ name });
+      return {
+        status: "replay",
+        video_id: VIDEO,
+        asset_status: "awaiting_upload",
+      };
+    },
+  });
+  const payload = await (await handleCreateCourseVideoUpload(
+    request(validBody()),
+    deps,
+  )).json();
+  assert.equal(payload.video_id, VIDEO);
+  assert.equal(payload.upload_required, true);
+  assert.equal(calls.fetch.length, 0);
+  assert.equal(calls.rpc.length, 1);
+});
+
+test("replay of a finished upload does not hand out a new signature", async () => {
+  const { deps } = dependencies({
+    rpc: async () => ({
+      status: "replay",
+      video_id: VIDEO,
+      asset_status: "ready",
+    }),
+  });
+  const payload = await (await handleCreateCourseVideoUpload(
+    request(validBody()),
+    deps,
+  )).json();
+  assert.equal(payload.upload_required, false);
+  assert.equal(payload.authorization_signature, undefined);
+});
+
+test("reclaimed slot finds the ambiguous Bunny object by title first", async () => {
+  const { deps, calls } = dependencies({
+    rpc: async (name, params) => {
+      calls.rpc.push({ name, params });
+      if (name === "course_video_claim_upload") {
+        return { status: "claimed", reclaimed: true };
+      }
+      return { status: "completed" };
+    },
+    fetchImpl: async (url, init) => {
+      calls.fetch.push({ url: String(url), init });
+      return new Response(
+        JSON.stringify({
+          items: [{
+            guid: VIDEO,
+            title:
+              `X5 lesson ${COURSE} lesson_E43F20F8-B2C6-4838-9E81-202864717743 lv_0123456789abcdef`,
+          }],
+        }),
+        { status: 200 },
+      );
+    },
+  });
+  const response = await handleCreateCourseVideoUpload(
+    request(validBody()),
+    deps,
+  );
+  assert.equal(response.status, 200);
+  assert.equal(calls.fetch.length, 1);
+  assert.equal(calls.fetch[0].init.method, "GET");
+});
+
+test("status mapping for rate limit, in-progress, conflict, expired", async () => {
+  const cases = [
+    ["rate_limited", 429],
+    ["in_progress", 425],
+    ["idempotency_conflict", 409],
+    ["expired", 410],
+  ];
+  for (const [status, http] of cases) {
+    const { deps } = dependencies({ rpc: async () => ({ status }) });
+    const response = await handleCreateCourseVideoUpload(
+      request(validBody()),
+      deps,
+    );
+    assert.equal(response.status, http, status);
+  }
+});
+
+test("Bunny create failure returns 502 and does not complete the slot", async () => {
+  const { deps, calls } = dependencies({
+    fetchImpl: async (url, init) => {
+      calls.fetch.push({ url: String(url), init });
+      return new Response("{}", { status: 401 });
+    },
+  });
+  const response = await handleCreateCourseVideoUpload(
+    request(validBody()),
+    deps,
+  );
+  assert.equal(response.status, 502);
+  assert.ok(
+    !calls.rpc.some((call) => call.name === "course_video_complete_upload"),
+  );
+});

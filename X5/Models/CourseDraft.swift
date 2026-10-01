@@ -367,6 +367,11 @@ struct CourseLessonDraft: Identifiable, Equatable {
         var updated = self
         updated.title = title
         updated.price = price
+        if !videoUrl.courseDraftTrimmed.isEmpty,
+           videoUrl.courseDraftTrimmed != savedVideoURL.courseDraftTrimmed {
+            // A manually entered URL replaces a Bunny video.
+            updated.clearBunnyVideo()
+        }
         updated.videoUrl = videoUrl
         updated.youtubeUrl = youtubeUrl
         updated.thumbnailUrl = thumbnailUrl
@@ -394,14 +399,27 @@ struct CourseLessonDraft: Identifiable, Equatable {
 
     var hasVideo: Bool {
         pendingVideoFileURL != nil
+            || bunnyVideoID != nil
             || !savedVideoURL.courseDraftTrimmed.isEmpty
             || !youtubeURL.courseDraftTrimmed.isEmpty
+    }
+
+    /// Bunny Stream GUID stored in the lesson JSON, if the video lives there.
+    var bunnyVideoID: String? {
+        CourseLessonBunnyFields.videoID(in: preservedFields)
     }
 
     var videoLabel: String {
         if let pendingVideoFileName = pendingVideoFileName?.courseDraftTrimmed,
            !pendingVideoFileName.isEmpty {
             return pendingVideoFileName
+        }
+        if bunnyVideoID != nil {
+            switch CourseLessonBunnyFields.status(in: preservedFields) {
+            case .ready: return "Видео (HLS 1080p)"
+            case .failed: return "Ошибка обработки видео — загрузите заново"
+            case .processing, .unknown: return "Видео обрабатывается"
+            }
         }
         if !savedVideoURL.courseDraftTrimmed.isEmpty { return "Video URL" }
         if !youtubeURL.courseDraftTrimmed.isEmpty { return "YouTube" }
@@ -414,9 +432,39 @@ struct CourseLessonDraft: Identifiable, Equatable {
     }
 
     mutating func markVideoUploadSucceeded(publicURL: String) {
+        clearBunnyVideo()
         savedVideoURL = publicURL.courseDraftTrimmed
         pendingVideoFileURL = nil
         pendingVideoFileName = nil
+    }
+
+    /// Bunny upload finished: the lesson keeps only the GUID. The public
+    /// `videoUrl` is removed so paid lessons never expose a permanent URL.
+    mutating func markBunnyVideoUploadSucceeded(videoID: String) {
+        preservedFields[CourseLessonBunnyFields.provider] =
+            .string(CourseLessonBunnyFields.providerValue)
+        preservedFields[CourseLessonBunnyFields.videoID] =
+            .string(videoID.lowercased())
+        preservedFields[CourseLessonBunnyFields.status] =
+            .string(CourseLessonBunnyStatus.processing.rawValue)
+        savedVideoURL = ""
+        pendingVideoFileURL = nil
+        pendingVideoFileName = nil
+    }
+
+    mutating func markVideoUploadSucceeded(_ result: CourseLessonVideoUploadResult) {
+        switch result {
+        case .storageURL(let url):
+            markVideoUploadSucceeded(publicURL: url)
+        case .bunny(let videoID):
+            markBunnyVideoUploadSucceeded(videoID: videoID)
+        }
+    }
+
+    mutating func clearBunnyVideo() {
+        preservedFields.removeValue(forKey: CourseLessonBunnyFields.provider)
+        preservedFields.removeValue(forKey: CourseLessonBunnyFields.videoID)
+        preservedFields.removeValue(forKey: CourseLessonBunnyFields.status)
     }
 
     mutating func stageThumbnailReplacement(jpegData: Data) {

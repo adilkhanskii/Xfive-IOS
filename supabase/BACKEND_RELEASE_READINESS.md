@@ -77,18 +77,21 @@ new remote upload, Storage mutation, or production database write.
   inventory evidence plus local preparation acceptance, not evidence of a new
   remote upload.
 
-### Quarantined Bunny managed/private route
+### Bunny Stream course videos (branch feature/bunny-stream-course-video)
 
-Only the separate Bunny prototype intended for original large-file delivery
-beyond the current 47,000,000-byte preparation boundary is disabled.
+Implemented 2026-10-01, not deployed. The quarantined prototype
+(`20260726233000_course_video_upload_slots.sql`, never applied) was replaced by
+`supabase/drafts/bunny-stream/` and three functions
+(`create-course-video-upload`, `course-video-playback`,
+`course-video-status`). Deploy order, the Bunny token-authentication switch and
+rollback: `docs/BUNNY-STREAM-HANDOFF.md`.
 
-- The Bunny function has a hard-coded false release gate, the iOS route is not
-  compiled without `X5_ENABLE_BUNNY_COURSE_VIDEO_UPLOAD`, and its draft RPCs are
-  revoked from API-facing roles.
-- The adapter does not yet provide entitlement-checked private playback,
-  processing/readiness state, moderation, abandoned/replaced-object cleanup, or
-  operational reconciliation. It must not be enabled or configured with Bunny
-  credentials.
+- Uploads: runtime flag `app_feature_flags.bunny_course_video_upload` (seeded
+  off), server-only broker RPCs, course author/developer check.
+- Playback: `course_video_playback_grant` entitlement check, short-lived
+  token-signed HLS. Old Supabase lessons keep their URLs until migrated.
+- Readiness and cleanup: Bunny webhook + pg_cron reconciler; only ledger-owned
+  Bunny videos are ever deleted.
 - Do not make the existing buckets private in isolation: every iOS/web/Android
   playback URL, entitlement check, sharing flow, cleanup job, and migration
   rollback must be designed and tested together. Until then, no release note or
@@ -134,10 +137,9 @@ beyond the current 47,000,000-byte preparation boundary is disabled.
     client signs portfolio paths. Confirm pending/rejected/orphan URLs return no
     public bytes, approved and owner reads sign successfully, and rejected plus
     24-hour orphan cleanup runs through the Storage API.
-14. Leave `create-course-video-upload` and
-    `20260726233000_course_video_upload_slots.sql` quarantined. Applying the
-    ledger migration is unnecessary for the current release and does not enable
-    the feature.
+14. Bunny Stream course videos ship only through
+    `docs/BUNNY-STREAM-HANDOFF.md` (drafts in `supabase/drafts/bunny-stream/`,
+    staging first, token authentication before any paid lesson uses Bunny).
 
 The backup, staged checks, and non-destructive operational rollback are in
 `ROLLBACK_20260801.md`. Production application is prohibited until that runbook

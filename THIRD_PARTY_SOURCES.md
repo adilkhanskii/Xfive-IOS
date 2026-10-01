@@ -354,14 +354,16 @@ bundled in the app.
 - Retrieved: 2026-07-26
 - Service: Bunny Stream is a commercial hosted service governed by Bunny's
   service terms; no Bunny SDK or provider source code is bundled.
-- Status: quarantined future source only. Build 192 does not compile or route
-  user uploads through Bunny, the server handler is hard-disabled, the draft
-  RPCs are unavailable to API-facing roles, and Bunny secrets are not
-  configured.
-- Planned use: direct resumable upload after private entitlement-checked
-  playback, provider readiness, moderation, cleanup, and server-only ledger
-  access are implemented and reviewed. The preserved prototype's public HLS
-  response is not release-safe and must not be enabled as written.
+- Additional references: CDN token authentication (directory tokens)
+  https://docs.bunny.net/docs/cdn-token-authentication and Stream webhooks
+  https://docs.bunny.net/docs/stream-webhook (retrieved 2026-10-01).
+- Status (2026-10-01, branch feature/bunny-stream-course-video): implemented,
+  not deployed. Uploads are routed to Bunny only when the runtime flag
+  `app_feature_flags.bunny_course_video_upload` is on (seeded off) and the
+  server-only broker RPCs are applied. Playback uses entitlement-checked,
+  token-signed short-lived HLS URLs from `course-video-playback`; the Bunny API
+  key and token key stay in Edge Function secrets. Deploy order and the
+  token-authentication switch are in `docs/BUNNY-STREAM-HANDOFF.md`.
 
 ## Kaspi Pay provider integration
 

@@ -89,16 +89,23 @@ final class CourseVideoPlaybackController: ObservableObject {
         return "Исходный файл — \(sourceQualityLabel). Для чёткого видео замените его исходником минимум 720p."
     }
 
-    private let sourceURL: URL?
+    typealias URLRefresher = () async -> URL?
+
+    private var sourceURL: URL?
+    /// Signed Bunny HLS URLs expire; the refresher asks the playback
+    /// function for a new one when the item fails or the user retries.
+    private let refreshURL: URLRefresher?
+    private var lastAutomaticRefresh: Date?
     private let pathMonitor = NWPathMonitor()
     private let monitorQueue = DispatchQueue(label: "x5.course.video.network")
     private var playerObservation: NSKeyValueObservation?
     private var itemObservations: [NSKeyValueObservation] = []
     private var bufferingTask: Task<Void, Never>?
 
-    init(url: URL?) {
+    init(url: URL?, refreshURL: URLRefresher? = nil) {
         let resolvedURL = Self.resolvedPlaybackURL(url)
         sourceURL = resolvedURL
+        self.refreshURL = refreshURL
         isAdaptiveStream = resolvedURL?.pathExtension.lowercased() == "m3u8"
         selectedQuality = isAdaptiveStream ? .automatic : .original
 
@@ -140,12 +147,26 @@ final class CourseVideoPlaybackController: ObservableObject {
     }
 
     func retry() {
-        guard let sourceURL, !isOffline else { return }
+        guard sourceURL != nil, !isOffline else { return }
         let resumeTime = player.currentTime()
         playbackError = nil
         showsWeakConnection = false
         isBuffering = true
 
+        if let refreshURL {
+            Task { [weak self] in
+                let fresh = await refreshURL()
+                guard let self else { return }
+                if let fresh { self.sourceURL = fresh }
+                self.reload(resumeTime: resumeTime)
+            }
+            return
+        }
+        reload(resumeTime: resumeTime)
+    }
+
+    private func reload(resumeTime: CMTime) {
+        guard let sourceURL else { return }
         let item = Self.makePlayerItem(url: sourceURL)
         player.replaceCurrentItem(with: item)
         applyQuality(to: item)
@@ -243,10 +264,21 @@ final class CourseVideoPlaybackController: ObservableObject {
             item.observe(\.status, options: [.initial, .new]) {
                 [weak self] item, _ in
                 Task { @MainActor [weak self] in
-                    guard item.status == .failed else { return }
-                    self?.playbackError =
+                    guard item.status == .failed, let self else { return }
+                    // A signed URL may have expired mid-lesson: fetch a new
+                    // one once per minute before showing an error.
+                    if self.refreshURL != nil,
+                       !self.isOffline,
+                       (self.lastAutomaticRefresh.map {
+                           Date().timeIntervalSince($0) > 60
+                       } ?? true) {
+                        self.lastAutomaticRefresh = Date()
+                        self.retry()
+                        return
+                    }
+                    self.playbackError =
                         "Видео не загрузилось. Нажмите «Повторить»."
-                    self?.isBuffering = false
+                    self.isBuffering = false
                 }
             }
         )

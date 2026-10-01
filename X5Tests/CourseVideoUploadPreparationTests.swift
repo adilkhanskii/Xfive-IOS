@@ -456,23 +456,31 @@ final class CourseVideoUploadPreparationTests: XCTestCase {
             fileURL: fixture
         )
 
-        // The production policy intentionally uploads this 17.6 MB file
-        // directly. Identity here proves preparation neither rewrote nor
-        // truncated the client's original media.
-        XCTAssertEqual(
+        // Every Supabase-path upload is re-encoded to H.264/AAC .mp4 with
+        // faststart, even below 47 MB; the source file stays untouched.
+        XCTAssertNotEqual(
             prepared.standardizedFileURL,
             fixture.standardizedFileURL
         )
+        defer { CourseVideoStaging.removeIfManaged(prepared) }
+        XCTAssertEqual(prepared.pathExtension.lowercased(), "mp4")
         let preparedSize = try XCTUnwrap(
             prepared.resourceValues(forKeys: [.fileSizeKey]).fileSize
         )
-        XCTAssertEqual(preparedSize, sourceSize)
+        XCTAssertLessThanOrEqual(
+            Int64(preparedSize),
+            CourseVideoUploadPolicy.directUploadLimitBytes
+        )
 
         let preparedAsset = AVURLAsset(url: prepared)
         let preparedIsPlayable = try await preparedAsset.load(.isPlayable)
         XCTAssertTrue(preparedIsPlayable)
         let preparedDuration = try await preparedAsset.load(.duration).seconds
-        XCTAssertEqual(preparedDuration, sourceDuration, accuracy: 0.001)
+        XCTAssertEqual(
+            preparedDuration,
+            sourceDuration,
+            accuracy: max(1, sourceDuration * 0.01)
+        )
         XCTAssertTrue(
             CourseVideoUploadPolicy.isAcceptablePreparedOutput(
                 fileSizeBytes: Int64(preparedSize),
@@ -488,8 +496,11 @@ final class CourseVideoUploadPreparationTests: XCTestCase {
             in: preparedAsset,
             mediaType: .audio
         )
-        XCTAssertEqual(preparedVideoCodecs, sourceVideoCodecs)
-        XCTAssertEqual(preparedAudioCodecs, sourceAudioCodecs)
+        XCTAssertEqual(preparedVideoCodecs, [kCMVideoCodecType_H264])
+        XCTAssertTrue(
+            preparedAudioCodecs.isEmpty
+                || preparedAudioCodecs == [kAudioFormatMPEG4AAC]
+        )
 
         let report = [
             "source_bytes=\(sourceSize)",
@@ -499,8 +510,8 @@ final class CourseVideoUploadPreparationTests: XCTestCase {
             "container=mp4 (major_brand=\(majorBrand))",
             "video_codecs=\(sourceVideoCodecs.map(fourCCString).joined(separator: ","))",
             "audio_codecs=\(sourceAudioCodecs.map(fourCCString).joined(separator: ","))",
-            "production_path=direct_upload",
-            "prepared_url_is_source=true"
+            "production_path=transcoded_h264_faststart",
+            "prepared_url_is_source=false"
         ].joined(separator: "\n")
         let attachment = XCTAttachment(string: report)
         attachment.name = "Real client course video verification"

@@ -889,6 +889,7 @@ struct CourseDetailView: View {
                     ) { lesson in
                         LessonRow(
                             lesson: lesson,
+                            courseID: course.id,
                             canPlay: CourseAccessPolicy.canAccess(
                                 lesson: lesson,
                                 in: course,
@@ -1437,6 +1438,7 @@ private struct LockedSoonLessonRow: View {
 
 private struct LessonRow: View {
     let lesson: CourseLesson
+    let courseID: String
     let canPlay: Bool
     /// Price to show when this single lesson can be bought on its own. Nil when
     /// the lesson only comes with the whole course.
@@ -1444,13 +1446,13 @@ private struct LessonRow: View {
     let requestUnlock: () -> Void
     @EnvironmentObject private var loc: LocalizationService
 
-    var hasVideo: Bool { lesson.playableURL != nil }
+    var hasVideo: Bool { lesson.hasAnyVideo }
 
     var body: some View {
         Group {
             if canPlay && hasVideo {
                 NavigationLink {
-                    LessonPlayerView(lesson: lesson)
+                    LessonPlayerView(lesson: lesson, courseID: courseID)
                 } label: { content }
                 .buttonStyle(.plain)
             } else {
