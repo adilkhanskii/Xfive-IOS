@@ -35,6 +35,12 @@ export function pinnedAppleRootCertificates(): Uint8Array[] {
 
 const MAX_SIGNED_TRANSACTION_LENGTH = 64 * 1024;
 const MAX_CLOCK_SKEW_MS = 5 * 60_000;
+// Apple bills an auto-renewal up to 24 hours before the current period ends
+// and signs the renewal transaction at that moment. Its purchaseDate is the
+// start of the new period, so a renewal from StoreKit may be signed, and sent
+// by the app, up to a day before purchaseDate. One extra hour absorbs clock
+// skew. Consumables keep the strict clock-skew window.
+export const MAX_RENEWAL_EARLY_SIGNING_MS = 25 * 60 * 60_000;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -227,10 +233,19 @@ export function validateVerifiedTransaction(
     payload.signedDate,
     "invalid_signed_date",
   );
-  if (purchaseDateMs > nowMs + MAX_CLOCK_SKEW_MS) {
+  const maxPurchaseLeadMs = productKind === "subscription"
+    ? MAX_RENEWAL_EARLY_SIGNING_MS
+    : MAX_CLOCK_SKEW_MS;
+  if (purchaseDateMs > nowMs + maxPurchaseLeadMs) {
     throw new InputError("invalid_purchase_date");
   }
   if (signedDateMs > nowMs + MAX_CLOCK_SKEW_MS) {
+    throw new InputError("invalid_signed_date");
+  }
+  if (
+    productKind === "subscription" &&
+    signedDateMs < purchaseDateMs - MAX_RENEWAL_EARLY_SIGNING_MS
+  ) {
     throw new InputError("invalid_signed_date");
   }
 

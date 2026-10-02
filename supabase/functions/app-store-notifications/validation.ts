@@ -29,6 +29,13 @@ export const CONSUMABLE_PRODUCT_IDS = new Set([
 
 const MAX_SIGNED_PAYLOAD_LENGTH = 128 * 1024;
 const MAX_CLOCK_SKEW_MS = 5 * 60_000;
+// Apple bills an auto-renewal up to 24 hours before the current period ends
+// and signs the renewal transaction, renewal info and DID_RENEW notification
+// at that moment. The renewal's purchaseDate is the start of the new period,
+// so its signatures legitimately precede purchaseDate, and its first delivery
+// arrives before purchaseDate, by up to a day. One extra hour absorbs Apple
+// batching and clock skew; anything earlier or further ahead is rejected.
+export const MAX_RENEWAL_EARLY_SIGNING_MS = 25 * 60 * 60_000;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -704,9 +711,13 @@ export function validateVerifiedSubscriptionLifecycleNotification(
   if (expiresDateMs <= purchaseDateMs) {
     throw new InputError("invalid_expiration_date");
   }
+  // Only the period start may lie ahead (an early-billed renewal). Every
+  // signature must already exist, and the notification is signed last.
+  if (purchaseDateMs > _nowMs + MAX_RENEWAL_EARLY_SIGNING_MS) {
+    throw new InputError("invalid_purchase_date");
+  }
   for (
     const [value, code] of [
-      [purchaseDateMs, "invalid_purchase_date"],
       [transactionSignedDateMs, "invalid_signed_date"],
       [renewalSignedDateMs, "invalid_renewal_signed_date"],
       [notificationSignedDateMs, "invalid_notification_signed_date"],
@@ -715,8 +726,8 @@ export function validateVerifiedSubscriptionLifecycleNotification(
     if (value > _nowMs + MAX_CLOCK_SKEW_MS) throw new InputError(code);
   }
   if (
-    transactionSignedDateMs < purchaseDateMs - MAX_CLOCK_SKEW_MS ||
-    renewalSignedDateMs < purchaseDateMs - MAX_CLOCK_SKEW_MS ||
+    transactionSignedDateMs < purchaseDateMs - MAX_RENEWAL_EARLY_SIGNING_MS ||
+    renewalSignedDateMs < purchaseDateMs - MAX_RENEWAL_EARLY_SIGNING_MS ||
     notificationSignedDateMs < transactionSignedDateMs - MAX_CLOCK_SKEW_MS ||
     notificationSignedDateMs < renewalSignedDateMs - MAX_CLOCK_SKEW_MS
   ) {
