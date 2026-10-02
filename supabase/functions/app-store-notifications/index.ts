@@ -58,7 +58,29 @@ export interface NotificationHandlerDependencies {
     event: SubscriptionLifecycleNotificationEvent,
   ): Promise<NotificationApplyResult>;
   logError(error: unknown): void;
+  logDiagnostic?(entry: NotificationDiagnostic): void;
 }
+
+// Every non-applied outcome is logged with its exact reason. Only verified
+// Apple routing fields are included: no transaction ids, tokens or users.
+export interface NotificationDiagnostic {
+  outcome: "ignored" | "rejected";
+  http_status: number;
+  code: string;
+  reason?: string;
+  environment?: AppStoreEnvironment;
+  notification_type?: string;
+  notification_subtype?: string;
+  notification_uuid?: string;
+}
+
+type NotificationDiagnosticContext = Pick<
+  NotificationDiagnostic,
+  | "environment"
+  | "notification_type"
+  | "notification_subtype"
+  | "notification_uuid"
+>;
 
 export class AppleVerificationError extends Error {
   constructor(
@@ -71,9 +93,35 @@ export class AppleVerificationError extends Error {
 }
 
 export class NotificationApplyError extends Error {
-  constructor(readonly code: string, readonly httpStatus: number) {
+  constructor(
+    readonly code: string,
+    readonly httpStatus: number,
+    readonly reason: string = code,
+  ) {
     super(code);
   }
+}
+
+class NotificationRpcFailure extends Error {
+  constructor(message: string, readonly reason: string) {
+    super(message);
+  }
+}
+
+// Database functions raise bare snake_case reason codes. Anything else is
+// reduced to a constraint name or an error code, never row details.
+export function safeRpcReason(
+  error: { code?: unknown; message?: unknown },
+): string {
+  const message = typeof error.message === "string" ? error.message.trim() : "";
+  if (/^[a-z][a-z0-9_]{0,63}$/.test(message)) return message;
+  const constraint = message.match(
+    /violates [a-z -]*constraint "([A-Za-z0-9_]{1,63})"/,
+  );
+  if (constraint) return `constraint_${constraint[1].toLowerCase()}`;
+  return typeof error.code === "string" && /^[0-9A-Z]{5,8}$/.test(error.code)
+    ? `code_${error.code}`
+    : "code_unknown";
 }
 
 export function createHandler(
@@ -87,6 +135,26 @@ export function createHandler(
         { Allow: "POST" },
       );
     }
+
+    const context: NotificationDiagnosticContext = {};
+    const diagnose = (
+      outcome: NotificationDiagnostic["outcome"],
+      httpStatus: number,
+      code: string,
+      reason?: string,
+    ) => {
+      try {
+        _dependencies.logDiagnostic?.({
+          outcome,
+          http_status: httpStatus,
+          code,
+          ...(reason && reason !== code ? { reason } : {}),
+          ...context,
+        });
+      } catch {
+        // Diagnostics must never change the response Apple receives.
+      }
+    };
 
     try {
       if (
@@ -112,6 +180,10 @@ export function createHandler(
       if (!isRecord(notification)) {
         throw new InputError("invalid_notification_payload");
       }
+      Object.assign(
+        context,
+        notificationDiagnosticContext(notification, environment),
+      );
       const isRefund = notification.notificationType === "REFUND" ||
         notification.notificationType === "REFUND_REVERSED";
       const isOneTimeCharge = notification.notificationType ===
@@ -120,6 +192,7 @@ export function createHandler(
         notification.notificationType,
       );
       if (!isRefund && !isOneTimeCharge && !isLifecycle) {
+        diagnose("ignored", 200, "unsupported_notification_type");
         return jsonResponse({ status: "ignored" }, 200);
       }
       if (!isRecord(notification.data)) {
@@ -190,39 +263,64 @@ export function createHandler(
     } catch (error) {
       if (error instanceof InputError) {
         if (error.status === 200) {
+          diagnose("ignored", 200, error.code);
           return jsonResponse(
             { status: "ignored", reason: error.code },
             200,
           );
         }
+        diagnose("rejected", error.status, error.code);
         return jsonResponse(
           { status: "rejected", error: error.code },
           error.status,
         );
       }
       if (error instanceof AppleVerificationError) {
-        return error.retryable
-          ? jsonResponse({
-            status: "rejected",
-            error: "apple_verification_unavailable",
-          }, 503)
-          : jsonResponse({
-            status: "rejected",
-            error: `invalid_apple_${error.phase}_${
-              safeAppleVerificationCode(error.diagnosticCode)
-            }`,
-          }, 400);
+        const code = error.retryable
+          ? "apple_verification_unavailable"
+          : `invalid_apple_${error.phase}_${
+            safeAppleVerificationCode(error.diagnosticCode)
+          }`;
+        const status = error.retryable ? 503 : 400;
+        diagnose("rejected", status, code);
+        return jsonResponse({ status: "rejected", error: code }, status);
       }
       if (error instanceof NotificationApplyError) {
+        diagnose("rejected", error.httpStatus, error.code, error.reason);
         return jsonResponse(
           { status: "rejected", error: error.code },
           error.httpStatus,
         );
       }
       _dependencies.logError(error);
+      diagnose(
+        "rejected",
+        500,
+        "server_error",
+        error instanceof NotificationRpcFailure ? error.reason : undefined,
+      );
       return jsonResponse({ status: "rejected", error: "server_error" }, 500);
     }
   };
+}
+
+function notificationDiagnosticContext(
+  notification: Record<string, unknown>,
+  environment: AppStoreEnvironment,
+): NotificationDiagnosticContext {
+  const token = (value: unknown, pattern: RegExp) =>
+    typeof value === "string" && pattern.test(value) ? value : undefined;
+  const context: NotificationDiagnosticContext = { environment };
+  const type = token(notification.notificationType, /^[A-Z0-9_]{1,64}$/);
+  const subtype = token(notification.subtype, /^[A-Z0-9_]{1,64}$/);
+  const uuid = token(
+    notification.notificationUUID,
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+  );
+  if (type) context.notification_type = type;
+  if (subtype) context.notification_subtype = subtype;
+  if (uuid) context.notification_uuid = uuid.toLowerCase();
+  return context;
 }
 
 function safeAppleVerificationCode(code: string): string {
@@ -516,15 +614,22 @@ async function applyNotification(
       token.includes("notification_event_id_conflict") ||
       token.includes("notification_source_mismatch")
     ) {
-      throw new NotificationApplyError("conflict", 409);
+      throw new NotificationApplyError("conflict", 409, safeRpcReason(error));
     }
     if (
       token.includes("invalid_") || token.includes("unknown_product") ||
       token.includes("missing_") || token.includes("profile_not_found")
     ) {
-      throw new NotificationApplyError("invalid_notification", 400);
+      throw new NotificationApplyError(
+        "invalid_notification",
+        400,
+        safeRpcReason(error),
+      );
     }
-    throw new Error("apply_app_store_notification_failed");
+    throw new NotificationRpcFailure(
+      "apply_app_store_notification_failed",
+      safeRpcReason(error),
+    );
   }
   if (!isNotificationApplyResult(data)) {
     throw new Error("invalid_notification_rpc_response");
@@ -585,7 +690,7 @@ async function applyOneTimeCharge(
       token.includes("owned_by_other") ||
       token.includes("transaction_id_conflict")
     ) {
-      throw new NotificationApplyError("conflict", 409);
+      throw new NotificationApplyError("conflict", 409, safeRpcReason(error));
     }
     if (
       token.includes("invalid_") || token.includes("unknown_product") ||
@@ -593,9 +698,16 @@ async function applyOneTimeCharge(
       token.includes("sandbox_review_account_not_allowed") ||
       token.includes("sandbox_review_credit_cap_exceeded")
     ) {
-      throw new NotificationApplyError("invalid_notification", 400);
+      throw new NotificationApplyError(
+        "invalid_notification",
+        400,
+        safeRpcReason(error),
+      );
     }
-    throw new Error("apply_app_store_one_time_charge_failed");
+    throw new NotificationRpcFailure(
+      "apply_app_store_one_time_charge_failed",
+      safeRpcReason(error),
+    );
   }
   if (!isNotificationApplyResult(data)) {
     throw new Error("invalid_one_time_charge_rpc_response");
@@ -650,9 +762,16 @@ async function resolveNotificationUser(
       token.includes("profile_not_found") || token.includes("invalid_") ||
       token.includes("unknown_product")
     ) {
-      throw new NotificationApplyError("invalid_notification", 400);
+      throw new NotificationApplyError(
+        "invalid_notification",
+        400,
+        safeRpcReason(error),
+      );
     }
-    throw new Error("resolve_app_store_notification_user_failed");
+    throw new NotificationRpcFailure(
+      "resolve_app_store_notification_user_failed",
+      safeRpcReason(error),
+    );
   }
   if (typeof data !== "string") {
     throw new Error("invalid_notification_user_resolution");
@@ -705,16 +824,23 @@ async function applyLifecycleNotification(
       token.includes("lifecycle_event_id_conflict") ||
       token.includes("lifecycle_source_mismatch")
     ) {
-      throw new NotificationApplyError("conflict", 409);
+      throw new NotificationApplyError("conflict", 409, safeRpcReason(error));
     }
     if (
       token.includes("invalid_") || token.includes("unknown_product") ||
       token.includes("missing_") || token.includes("profile_not_found") ||
       token.includes("sandbox_review_account_not_allowed")
     ) {
-      throw new NotificationApplyError("invalid_notification", 400);
+      throw new NotificationApplyError(
+        "invalid_notification",
+        400,
+        safeRpcReason(error),
+      );
     }
-    throw new Error("apply_app_store_lifecycle_failed");
+    throw new NotificationRpcFailure(
+      "apply_app_store_lifecycle_failed",
+      safeRpcReason(error),
+    );
   }
   if (!isNotificationApplyResult(data)) {
     throw new Error("invalid_lifecycle_rpc_response");
@@ -748,6 +874,13 @@ const runtimeDependencies: NotificationHandlerDependencies = {
   logError: (error) => {
     const name = error instanceof Error ? error.name : typeof error;
     console.error("app-store-notifications failed", { name });
+  },
+  logDiagnostic: (entry) => {
+    if (entry.outcome === "ignored") {
+      console.info("app-store-notifications ignored", entry);
+    } else {
+      console.warn("app-store-notifications rejected", entry);
+    }
   },
 };
 

@@ -80,9 +80,32 @@ export class EntitlementApplyError extends Error {
       | "rejected"
       | "account_token_mismatch"
       | "sandbox_test_not_billable" = statusValue,
+    readonly reason?: string,
   ) {
     super(statusValue);
   }
+}
+
+class EntitlementRpcFailure extends Error {
+  constructor(message: string, readonly reason: string) {
+    super(message);
+  }
+}
+
+// Database functions raise bare snake_case reason codes. Anything else is
+// reduced to a constraint name or an error code, never row details.
+export function safeRpcReason(
+  error: { code?: unknown; message?: unknown },
+): string {
+  const message = typeof error.message === "string" ? error.message.trim() : "";
+  if (/^[a-z][a-z0-9_]{0,63}$/.test(message)) return message;
+  const constraint = message.match(
+    /violates [a-z -]*constraint "([A-Za-z0-9_]{1,63})"/,
+  );
+  if (constraint) return `constraint_${constraint[1].toLowerCase()}`;
+  return typeof error.code === "string" && /^[0-9A-Z]{5,8}$/.test(error.code)
+    ? `code_${error.code}`
+    : "code_unknown";
 }
 
 type AccountTokenMismatchDiagnostic =
@@ -243,7 +266,16 @@ export function createHandler(
       }
       if (error instanceof EntitlementApplyError) {
         _dependencies.logError(error);
-        return jsonResponse({ status: error.statusValue }, error.httpStatus);
+        // A plain database rejection carries its exact reason code so the
+        // app diagnostics show why. Ownership outcomes keep their exact
+        // contracts: the app treats an account_token_mismatch error specially.
+        return jsonResponse(
+          error.statusValue === "rejected" &&
+            error.diagnosticCode === "rejected" && error.reason
+            ? { status: error.statusValue, error: error.reason }
+            : { status: error.statusValue },
+          error.httpStatus,
+        );
       }
       _dependencies.logError(error);
       return jsonResponse({ status: "rejected", error: "server_error" }, 500);
@@ -607,6 +639,7 @@ async function applyVerifiedRpc(
       error.details ?? ""
     } ${error.hint ?? ""}`
       .toLowerCase();
+    const reason = safeRpcReason(error);
     if (
       safeToken.includes("owned_by_other") ||
       safeToken.includes("transaction_id_conflict") ||
@@ -625,6 +658,7 @@ async function applyVerifiedRpc(
         "rejected",
         400,
         "account_token_mismatch",
+        reason,
       );
     }
     if (
@@ -650,9 +684,9 @@ async function applyVerifiedRpc(
       safeToken.includes("consumable_refund_source_mismatch") ||
       safeToken.includes("invalid_revocation_date")
     ) {
-      throw new EntitlementApplyError("rejected", 400);
+      throw new EntitlementApplyError("rejected", 400, "rejected", reason);
     }
-    throw new Error(`${rpcName}_failed`);
+    throw new EntitlementRpcFailure(`${rpcName}_failed`, reason);
   }
 
   if (!isEntitlementResult(data)) {
@@ -700,9 +734,14 @@ const runtimeDependencies: HandlerDependencies = {
       ? error.diagnosticCode
       : "server_error";
     const ownership = accountTokenMismatchDiagnostic(error);
+    const reason = error instanceof EntitlementApplyError ||
+        error instanceof EntitlementRpcFailure
+      ? error.reason
+      : undefined;
     console.error("verify-app-store-transaction failed", {
       name,
       code,
+      ...(reason ? { reason } : {}),
       ...(ownership
         ? {
           transaction_id: ownership.transactionId,
