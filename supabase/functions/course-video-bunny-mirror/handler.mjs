@@ -1,5 +1,5 @@
 // "No-rebuild" Bunny mirror for course lesson videos (see migration
-// 20261001120000_course_video_bunny_mirror.sql).
+// 20261002140000_course_video_bunny_mirror.sql).
 //
 // For every lesson whose videoUrl is a public object in Supabase bucket
 // `videos`: Bunny fetches the file from that public URL, encodes adaptive HLS,

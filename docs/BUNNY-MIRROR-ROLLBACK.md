@@ -21,7 +21,7 @@
 ## Запуск (после подтверждения Диаса)
 
 1. Секрет `COURSE_VIDEO_CRON_SECRET` (≥ 32 случайных символа) в Edge Secrets и тот же в Vault `x5_course_video_cron_secret`.
-2. Применить `supabase/migrations/20261001120000_course_video_bunny_mirror.sql`.
+2. Применить `supabase/migrations/20261002140000_course_video_bunny_mirror.sql`.
 3. `supabase functions deploy course-video-bunny-mirror --project-ref afwznqjpshybmqhlewmy`.
 4. Тест-курс: POST `/functions/v1/course-video-bunny-mirror` с заголовком `X-X5-Reconcile-Secret` и телом `{"course_id":"753cd9bd-2c7b-49c7-969e-badad92f55f5"}` — повторять до `swapped`; затем `{"course_id":"…","delete_grace_minutes":0}` → `storage_deleted`. Проверить `curl` плейлист + сегмент.
 5. Все курсы: `{"dry_run":true}` → без `course_id`. Удаление по умолчанию через 24 ч после замены ссылки (защита от редактора, который сохранит старую копию курса).
