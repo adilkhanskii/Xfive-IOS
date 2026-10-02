@@ -26,12 +26,19 @@ why the amount is shown to copy instead.
 
 ## Enabling it in production
 
-Apply the migration, then store the merchant requisites with the service-role
-key. The key is read from the environment and never written to the repository.
+Apply the migration by hand (production migration history has diverged, so
+`supabase db push` is unsafe; see docs/MIGRATION-HISTORY-2026-10-02.md for the
+order and the history repair), then store the merchant requisites with the
+service-role key. The key is read from the environment and never written to
+the repository.
 
 ```powershell
-supabase db push
+supabase db query --linked -f supabase/migrations/20260903150000_kaspi_manual_transfers.sql
 ```
+
+Approved transfers are granted as permanent credits (the same
+`x5.permanent_credit_grant_user` flag the App Store and Google Play grants set),
+so they never expire.
 
 ```powershell
 $env:SUPABASE_SERVICE_ROLE_KEY = '<protected server key>'
