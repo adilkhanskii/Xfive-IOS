@@ -8,6 +8,11 @@
 -- Every function below is SECURITY DEFINER and refuses anyone who is not in
 -- public.is_x5_developer(). They return aggregates as JSON; no raw row of one
 -- user is ever handed to another.
+--
+-- Safe to run more than once: every object is created with if-not-exists,
+-- create-or-replace or a guarded block, and grants are restated from scratch.
+
+begin;
 
 -- ---------------------------------------------------------------- visits ----
 
@@ -30,22 +35,62 @@ create index if not exists app_visit_events_user_idx
 create index if not exists app_visit_events_session_idx
   on public.app_visit_events (session_id, occurred_at desc);
 
+-- The site writes screen names and the native build string; anything longer is
+-- not a screen name and must not grow the table.
+do $visit_limits$
+begin
+  if not exists (
+    select 1 from pg_constraint
+     where conrelid = 'public.app_visit_events'::regclass
+       and conname = 'app_visit_events_screen_length'
+  ) then
+    alter table public.app_visit_events
+      add constraint app_visit_events_screen_length
+      check (screen is null or char_length(screen) <= 200);
+  end if;
+  if not exists (
+    select 1 from pg_constraint
+     where conrelid = 'public.app_visit_events'::regclass
+       and conname = 'app_visit_events_app_version_length'
+  ) then
+    alter table public.app_visit_events
+      add constraint app_visit_events_app_version_length
+      check (app_version is null or char_length(app_version) <= 80);
+  end if;
+end;
+$visit_limits$;
+
+-- A signed-in client may only append its own visit rows, and only the columns
+-- web/src/services/visitTracking.ts sends: id and occurred_at stay server-owned.
+-- Nobody but the service role reads raw rows; the developer reports below are
+-- SECURITY DEFINER functions owned by postgres, which has BYPASSRLS.
 alter table public.app_visit_events enable row level security;
+alter table public.app_visit_events force row level security;
+
+revoke all on table public.app_visit_events from public, anon, authenticated;
+grant all on table public.app_visit_events to service_role;
+grant insert (user_id, session_id, platform, screen, app_version)
+  on public.app_visit_events to authenticated;
 
 drop policy if exists "visit events insert own" on public.app_visit_events;
 create policy "visit events insert own"
   on public.app_visit_events for insert to authenticated
   with check (user_id = (select auth.uid()));
 
+-- Raw visit rows are never readable from a client, not even a developer's.
 drop policy if exists "visit events developer read" on public.app_visit_events;
-create policy "visit events developer read"
-  on public.app_visit_events for select to authenticated
-  using (public.is_x5_developer());
 
 -- ------------------------------------------------------------ price table ---
 
 -- The stores hold the real payouts; until that sync runs, revenue is the
 -- catalog price of what was actually credited.
+--
+-- App Store product ids sit next to their Google Play twins: most
+-- iap_entitlements rows carry com.x5studio.app.* ids, which used to fall
+-- through to 0. Prices: scripts/asc_configure_credit_store.py (credit packs) and
+-- .github/workflows/asc-configure-subscriptions.yml (lite/pro/max/verified).
+-- The retired Google Play ids x5_pro_monthly, x5_pro_yearly and
+-- x5_verified_monthly have no price anywhere in the repository and stay 0.
 create or replace function public.x5_product_price_kzt(product_id text)
 returns integer
 language sql
@@ -54,12 +99,19 @@ set search_path to ''
 as $$
   select case product_id
     when 'x5_credits_1000_v2' then 1000
+    when 'com.x5studio.app.credits.1000' then 1000
     when 'x5_credits_2000_v2' then 2000
+    when 'com.x5studio.app.credits.2000' then 2000
     when 'x5_credits_5000_v2' then 5000
+    when 'com.x5studio.app.credits.5000' then 5000
     when 'x5_verified_monthly_v2' then 1000
+    when 'com.x5studio.app.verified.monthly' then 1000
     when 'x5_lite_monthly_v2' then 1000
+    when 'com.x5studio.app.lite.monthly' then 1000
     when 'x5_pro_monthly_v2' then 2000
+    when 'com.x5studio.app.pro.monthly' then 2000
     when 'x5_max_monthly_v2' then 5000
+    when 'com.x5studio.app.max.monthly' then 5000
     else 0
   end;
 $$;
@@ -78,7 +130,10 @@ end;
 $$;
 
 -- Every generation table shares the same shape, so one view feeds every report.
-create or replace view public.x5_generation_usage as
+-- security_invoker: the view never lends its owner's rights to a caller. Only
+-- the SECURITY DEFINER reports (owner postgres) and the service role read it.
+create or replace view public.x5_generation_usage
+  with (security_invoker = true) as
   select 'image'::text as tool, user_id, status, cost_credits, error_code,
          refunded_at, created_at
     from public.image_generation_requests
@@ -92,7 +147,8 @@ create or replace view public.x5_generation_usage as
   select 'lipsync', user_id, status, cost_credits, error_code, refunded_at, created_at
     from public.lipsync_generation_jobs;
 
-revoke all on public.x5_generation_usage from anon, authenticated;
+revoke all on public.x5_generation_usage from public, anon, authenticated;
+grant select on public.x5_generation_usage to service_role;
 
 -- ---------------------------------------------------------------- reports ---
 
@@ -535,6 +591,20 @@ begin
 end;
 $$;
 
+-- Supabase's default privileges hand every new function to anon as well. The
+-- reports refuse non-developers anyway; this keeps them off the anon surface.
+revoke all on function public.x5_product_price_kzt(text) from public, anon;
+revoke all on function public.x5_require_developer() from public, anon;
+revoke all on function public.admin_analytics_overview(timestamptz, timestamptz) from public, anon;
+revoke all on function public.admin_analytics_revenue(timestamptz, timestamptz) from public, anon;
+revoke all on function public.admin_analytics_tools(timestamptz, timestamptz) from public, anon;
+revoke all on function public.admin_analytics_users(timestamptz, timestamptz, text, integer, integer) from public, anon;
+revoke all on function public.admin_analytics_user_detail(uuid) from public, anon;
+revoke all on function public.admin_analytics_visits(timestamptz, timestamptz) from public, anon;
+revoke all on function public.admin_analytics_health() from public, anon;
+
+grant execute on function public.x5_product_price_kzt(text) to authenticated, service_role;
+grant execute on function public.x5_require_developer() to authenticated, service_role;
 grant execute on function public.admin_analytics_overview(timestamptz, timestamptz) to authenticated;
 grant execute on function public.admin_analytics_revenue(timestamptz, timestamptz) to authenticated;
 grant execute on function public.admin_analytics_tools(timestamptz, timestamptz) to authenticated;
@@ -542,3 +612,5 @@ grant execute on function public.admin_analytics_users(timestamptz, timestamptz,
 grant execute on function public.admin_analytics_user_detail(uuid) to authenticated;
 grant execute on function public.admin_analytics_visits(timestamptz, timestamptz) to authenticated;
 grant execute on function public.admin_analytics_health() to authenticated;
+
+commit;
