@@ -374,9 +374,22 @@ begin
     raise exception using errcode = '55000', message = 'payment_not_reviewable';
   end if;
 
+  -- Bought credits never expire. profiles_credit_retention treats every credit
+  -- increase as timed (1-3 months) unless the granting code names the buyer in
+  -- x5.permanent_credit_grant_user for this transaction, exactly as the App
+  -- Store and Google Play grant paths do.
+  perform pg_catalog.set_config(
+    'x5.permanent_credit_grant_user', v_payment.buyer_id::text, true
+  );
   update public.profiles
   set credits = coalesce(credits, 0) + v_credits
   where id = v_payment.buyer_id;
+  if not found then
+    -- Never close an order as confirmed without the credits landing.
+    raise exception using errcode = 'P0002',
+      message = 'kaspi_buyer_profile_not_found';
+  end if;
+  perform pg_catalog.set_config('x5.permanent_credit_grant_user', '', true);
 
   return jsonb_build_object(
     'id', v_payment.id,
@@ -404,8 +417,11 @@ as $function$
 declare
   v_settings public.kaspi_payment_settings%rowtype;
 begin
-  if current_setting('request.jwt.claim.role', true) is distinct from 'service_role'
-     and current_user <> 'service_role' then
+  -- PostgREST only sets request.jwt.claims (JSON) now, and inside a SECURITY
+  -- DEFINER function current_user is the owner, so the old check refused even
+  -- the service role. auth.role() reads both GUC styles, like every other Kaspi
+  -- admin function.
+  if auth.role() is distinct from 'service_role' then
     raise exception using errcode = '42501', message = 'service_role_required';
   end if;
 
@@ -417,7 +433,7 @@ begin
   set recipient_name = coalesce(btrim(p_recipient_name), ''),
       recipient_phone = coalesce(btrim(p_recipient_phone), ''),
       recipient_iban = coalesce(btrim(p_recipient_iban), ''),
-      manual_enabled = p_enable,
+      manual_enabled = coalesce(p_enable, false),
       updated_at = now()
   where singleton = true
   returning * into v_settings;
