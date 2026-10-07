@@ -278,9 +278,13 @@ private final class BunnyTicketRequestRecorder {
 
     @discardableResult
     func record(_ request: URLRequest) -> Int {
+        // Внутри URLProtocol тело POST приходит как httpBodyStream, а не
+        // httpBody — без этого requestBodies всегда пустой и тест 425 падал.
+        let materialized = (try? request.materializingHTTPBodyForTesting())
+            ?? request
         lock.lock()
         defer { lock.unlock() }
-        requests.append(request)
+        requests.append(materialized)
         return requests.count
     }
 
