@@ -38,6 +38,16 @@ enum CISLocations {
         countries.first(where: { $0.code == code })?.name
     }
 
+    /// Строка для профиля: «Город, Страна». Пустые части пропускаем;
+    /// оба пустые — nil (строку в профиле тогда не показываем).
+    static func profileLocationText(city: String?, countryCode: String?) -> String? {
+        let cleanCity = (city ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let code = (countryCode ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let country = code.isEmpty ? "" : (countryName(for: code) ?? code)
+        let parts = [cleanCity, country].filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
+    }
+
     static func search(country: String, query: String, limit: Int = 12) -> [CISCity] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)

@@ -187,6 +187,17 @@ struct UserProfileView: View {
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(.white.opacity(0.66))
                     }
+                    // Город и страна — как в своём профиле; пусто — строки нет.
+                    if let location = CISLocations.profileLocationText(
+                        city: profile?.city ?? fallback?.city,
+                        countryCode: profile?.countryCode ?? fallback?.countryCode
+                    ) {
+                        Text("📍 \(location)")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.66))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
 
                     actionRow
 
@@ -387,7 +398,7 @@ struct UserProfileView: View {
             URLQueryItem(name: "id", value: "eq.\(userId)"),
             URLQueryItem(
                 name: "select",
-                value: "id,name,nickname,avatar,bio,services,plan,social_links,user_role,specialist_category,show_in_hub,is_public,signup_number,language,last_seen,is_verified,verified_until"
+                value: "id,name,nickname,avatar,bio,services,plan,social_links,user_role,specialist_category,show_in_hub,is_public,signup_number,language,last_seen,is_verified,verified_until,country_code,city"
             )
         ]
         var request = URLRequest(url: components.url!)

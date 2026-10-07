@@ -192,6 +192,17 @@ struct ProfileView: View {
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(.white.opacity(0.66))
                     }
+                    // Город и страна из «Редактировать профиль» (CISCityPicker); пусто — строки нет.
+                    if let location = CISLocations.profileLocationText(
+                        city: currentUser.profile?.city,
+                        countryCode: currentUser.profile?.countryCode
+                    ) {
+                        Text("📍 \(location)")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.66))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
 
                     if shouldShowHubVisibilityToggle {
                         hubVisibilityToggle
