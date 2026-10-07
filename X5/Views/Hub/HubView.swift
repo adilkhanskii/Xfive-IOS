@@ -925,7 +925,9 @@ private struct CategoryTile: View {
 
 // MARK: - Rows
 
-private struct SpecialistRow: View {
+// Не private: та же строка используется в списках подписчиков/подписок
+// (ProfileFollowListView), чтобы люди выглядели одинаково везде.
+struct SpecialistRow: View {
     let person: HubSpecialist
     @EnvironmentObject private var loc: LocalizationService
 
@@ -976,7 +978,13 @@ private struct SpecialistRow: View {
 
     private var categoryLabel: String {
         let ids = HubCategories.orderedIDs(from: person.specialistCategory)
-        return ids.prefix(2).map { HubCategories.label(for: $0, language: loc.current) }.joined(separator: " · ")
+        let label = ids.prefix(2).map { HubCategories.label(for: $0, language: loc.current) }.joined(separator: " · ")
+        // В Хабе у всех есть категория; в списке подписчиков бывают обычные
+        // пользователи без неё — тогда показываем @ник вместо пустой строки.
+        if label.isEmpty, let nick = person.nickname, !nick.isEmpty {
+            return "@\(nick)"
+        }
+        return label
     }
 }
 

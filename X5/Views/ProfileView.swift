@@ -328,14 +328,37 @@ struct ProfileView: View {
     private var heroStatsRow: some View {
         HStack(spacing: 8) {
             StatBubble(value: "\(currentUser.profile?.credits ?? 0)", label: loc.t("profile_credits"))
-            StatBubble(
-                value: followCounts?.followers.description ?? "—",
-                label: loc.t("profile_followers")
-            )
-            StatBubble(
-                value: followCounts?.following.description ?? "—",
-                label: loc.t("profile_following")
-            )
+            // Счётчики кликабельные: тап открывает список людей (просьба
+            // Адильхана 07.10 — «смотреть подписчиков и подписки»).
+            followListLink(.followers) {
+                StatBubble(
+                    value: followCounts?.followers.description ?? "—",
+                    label: loc.t("profile_followers")
+                )
+            }
+            followListLink(.following) {
+                StatBubble(
+                    value: followCounts?.following.description ?? "—",
+                    label: loc.t("profile_following")
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func followListLink<Content: View>(
+        _ kind: ProfileFollowListKind,
+        @ViewBuilder label: () -> Content
+    ) -> some View {
+        if let uid = auth.userId ?? currentUser.profile?.id {
+            NavigationLink {
+                ProfileFollowListView(userId: uid, initialKind: kind)
+            } label: {
+                label()
+            }
+            .buttonStyle(.plain)
+        } else {
+            label()
         }
     }
 

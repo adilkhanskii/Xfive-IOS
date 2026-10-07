@@ -275,8 +275,19 @@ struct UserProfileView: View {
 
     private var statsRow: some View {
         HStack(spacing: 8) {
-            PublicStatBubble(value: followingValue, label: loc.t("profile_following"))
-            PublicStatBubble(value: followersValue, label: loc.t("profile_followers"))
+            // Тап по счётчику → список людей; строки ведут в их профили.
+            NavigationLink {
+                ProfileFollowListView(userId: userId, initialKind: .following)
+            } label: {
+                PublicStatBubble(value: followingValue, label: loc.t("profile_following"))
+            }
+            .buttonStyle(.plain)
+            NavigationLink {
+                ProfileFollowListView(userId: userId, initialKind: .followers)
+            } label: {
+                PublicStatBubble(value: followersValue, label: loc.t("profile_followers"))
+            }
+            .buttonStyle(.plain)
             PublicStatBubble(value: creationsValue, label: loc.t("profile_creations"))
         }
     }

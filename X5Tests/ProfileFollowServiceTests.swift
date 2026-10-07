@@ -72,6 +72,111 @@ final class ProfileFollowServiceTests: XCTestCase {
         XCTAssertEqual(counts, ProfileFollowCounts(followers: 2, following: 2))
     }
 
+    // Список подписчиков: фильтр по following_id, люди — follower_id,
+    // профили приходят в любом порядке, а показываем в порядке подписок.
+    func testFollowersListKeepsFollowOrderAndSkipsDeletedProfiles() async throws {
+        let recorder = ProfileFollowRequestRecorder()
+        ProfileFollowURLProtocol.handler = { request in
+            recorder.record(request)
+            let url = try XCTUnwrap(request.url)
+            let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            func value(_ name: String) -> String? { items.first { $0.name == name }?.value }
+
+            if url.path.hasSuffix("/rest/v1/followers") {
+                XCTAssertEqual(value("following_id"), "eq.profile-id")
+                XCTAssertNil(value("follower_id"))
+                XCTAssertEqual(value("order"), "created_at.desc,id.desc")
+                XCTAssertEqual(value("offset"), "0")
+                XCTAssertEqual(value("limit"), "3")
+                let body = #"""
+                [{"follower_id":"b","following_id":"profile-id"},
+                 {"follower_id":"a","following_id":"profile-id"},
+                 {"follower_id":"gone","following_id":"profile-id"}]
+                """#
+                return Self.json(for: request, body)
+            }
+            if url.path.hasSuffix("/rest/v1/profiles") {
+                XCTAssertEqual(value("id"), "in.(b,a,gone)")
+                XCTAssertEqual(value("select"), ProfileFollowService.listProfileSelect)
+                let body = #"[{"id":"a","name":"Анна"},{"id":"b","nickname":"bob"}]"#
+                return Self.json(for: request, body)
+            }
+            XCTFail("Unexpected request: \(request)")
+            return Self.json(for: request, "[]")
+        }
+
+        let page = try await makeService().loadList(
+            .followers,
+            userId: "profile-id",
+            accessToken: "session-token",
+            offset: 0,
+            limit: 3
+        )
+
+        XCTAssertEqual(page.people.map(\.id), ["b", "a"])
+        XCTAssertTrue(page.hasMore, "full page means there may be more rows")
+        XCTAssertEqual(recorder.requests.count, 2)
+        XCTAssertTrue(recorder.requests.allSatisfy {
+            $0.value(forHTTPHeaderField: "Authorization") == "Bearer session-token"
+        })
+    }
+
+    // Подписки: фильтр по follower_id, люди — following_id; пустой ответ —
+    // без второго запроса и без «ещё».
+    func testFollowingListUsesFollowerColumnAndStopsOnEmptyPage() async throws {
+        let recorder = ProfileFollowRequestRecorder()
+        ProfileFollowURLProtocol.handler = { request in
+            recorder.record(request)
+            let url = try XCTUnwrap(request.url)
+            let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            XCTAssertTrue(url.path.hasSuffix("/rest/v1/followers"))
+            XCTAssertTrue(items.contains { $0.name == "follower_id" && $0.value == "eq.profile-id" })
+            XCTAssertEqual(items.first { $0.name == "offset" }?.value, "30")
+            return Self.json(for: request, "[]")
+        }
+
+        let page = try await makeService().loadList(
+            .following,
+            userId: "profile-id",
+            accessToken: nil,
+            offset: 30,
+            limit: 30
+        )
+
+        XCTAssertEqual(page, ProfileFollowPage(people: [], hasMore: false))
+        XCTAssertEqual(recorder.requests.count, 1)
+        XCTAssertNil(recorder.requests.first?.value(forHTTPHeaderField: "Authorization"))
+    }
+
+    func testFollowListSurfacesServerErrors() async {
+        ProfileFollowURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 500,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data())
+        }
+
+        do {
+            _ = try await makeService().loadList(.followers, userId: "profile-id", accessToken: nil)
+            XCTFail("Expected an HTTP error")
+        } catch {
+            XCTAssertEqual(error as? ProfileFollowServiceError, .http(statusCode: 500))
+        }
+    }
+
+    private static func json(for request: URLRequest, _ body: String) -> (HTTPURLResponse, Data) {
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"]
+        )!
+        return (response, Data(body.utf8))
+    }
+
     private func makeService() -> ProfileFollowService {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ProfileFollowURLProtocol.self]
