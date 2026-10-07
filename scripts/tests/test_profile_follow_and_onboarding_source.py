@@ -51,6 +51,41 @@ class ProfileFollowAndOnboardingSourceTests(unittest.TestCase):
             public,
         )
 
+    def test_follow_counters_open_people_lists_on_own_and_public_profiles(self):
+        # Просьба Адильхана 07.10: счётчики «Подписчики/Подписки» открывают
+        # список людей, а строка ведёт в публичный профиль.
+        own = (ROOT / "X5/Views/ProfileView.swift").read_text(encoding="utf-8")
+        public = (ROOT / "X5/Views/Hub/UserProfileView.swift").read_text(
+            encoding="utf-8"
+        )
+        screen = (ROOT / "X5/Views/Hub/ProfileFollowListView.swift").read_text(
+            encoding="utf-8"
+        )
+        service = (ROOT / "X5/Services/ProfileFollowService.swift").read_text(
+            encoding="utf-8"
+        )
+        hub = (ROOT / "X5/Views/Hub/HubView.swift").read_text(encoding="utf-8")
+
+        self.assertIn("followListLink(.followers)", own)
+        self.assertIn("followListLink(.following)", own)
+        self.assertIn("ProfileFollowListView(userId: uid, initialKind: kind)", own)
+        self.assertIn(
+            "ProfileFollowListView(userId: userId, initialKind: .followers)", public
+        )
+        self.assertIn(
+            "ProfileFollowListView(userId: userId, initialKind: .following)", public
+        )
+
+        self.assertIn("followService.loadList(", screen)
+        self.assertIn("UserProfileView(userId: person.id, fallback: person)", screen)
+        self.assertIn("SpecialistRow(person: person)", screen)
+        self.assertIn("BlockList.contains", screen)
+        self.assertIn("\nstruct SpecialistRow: View {", hub)
+        self.assertNotIn("private struct SpecialistRow", hub)
+
+        self.assertIn('case .followers: return "following_id"', service)
+        self.assertIn('URLQueryItem(name: "order", value: "created_at.desc,id.desc")', service)
+
     def test_onboarding_primary_button_has_explicit_readable_states(self):
         source = (ROOT / "X5/Views/OnboardingView.swift").read_text(
             encoding="utf-8"
