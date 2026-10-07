@@ -55,8 +55,9 @@ class ReleaseVersionSourceTests(unittest.TestCase):
         # release/ios, so runtime and review targets are the same number again.
         # 07.10.2026: тестовые TestFlight-сборки ушли вперёд (245 — фикс модуля
         # курса + чат + город в профиле; 246 — то же + Bunny Stream для видео
-        # уроков, одна общая сборка); цель ревью App Store ниже остаётся 243.
-        self.assertEqual(runtime_build_number, "246")
+        # уроков, одна общая сборка; 247 — фикс двойной галереи обложки урока);
+        # цель ревью App Store ниже остаётся 243.
+        self.assertEqual(runtime_build_number, "247")
         self.assertEqual(fastlane_version, marketing_version)
         self.assertIn(
             f"Version {marketing_version} build 243",

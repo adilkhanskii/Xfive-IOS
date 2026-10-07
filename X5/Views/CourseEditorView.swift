@@ -1154,6 +1154,9 @@ private struct LessonEditorSheet: View {
     @State private var pendingThumbnailData: Data?
     @State private var showingVideoPicker = false
     @State private var thumbnailItem: PhotosPickerItem?
+    // Один флаг на одну галерею обложки: раньше в строке Form стояли два
+    // PhotosPicker, и тап по строке открывал оба → галерея «моргала» 2 раза.
+    @State private var showingThumbnailPicker = false
     @State private var uploading = false
     @State private var uploadingThumbnail = false
     @State private var errorText: String?
@@ -1277,6 +1280,8 @@ private struct LessonEditorSheet: View {
                     .disabled(title.x5Trimmed.isEmpty || uploading || uploadingThumbnail)
                 }
             }
+            // Галерея обложки показывается только отсюда — одна презентация на весь экран.
+            .photosPicker(isPresented: $showingThumbnailPicker, selection: $thumbnailItem, matching: .images)
             .onChange(of: thumbnailItem) { newValue in
                 guard let newValue else { return }
                 Task { await importThumbnail(newValue) }
@@ -1309,7 +1314,12 @@ private struct LessonEditorSheet: View {
             Text("Обложка видео")
                 .font(.subheadline.weight(.semibold))
 
-            PhotosPicker(selection: $thumbnailItem, matching: .images) {
+            // В строке Form кнопки со стилем по умолчанию срабатывают ВСЕ сразу
+            // при тапе в любом месте строки. Поэтому .borderless у каждой кнопки,
+            // а сама галерея — один .photosPicker на Form (см. body).
+            Button {
+                showingThumbnailPicker = true
+            } label: {
                 ZStack {
                     if let data = pendingThumbnailData, let img = UIImage(data: data) {
                         Image(uiImage: img).resizable().scaledToFill()
@@ -1332,12 +1342,16 @@ private struct LessonEditorSheet: View {
                 .frame(height: 154)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
+            .buttonStyle(.borderless)
             .disabled(uploadingThumbnail)
 
             HStack {
-                PhotosPicker(selection: $thumbnailItem, matching: .images) {
+                Button {
+                    showingThumbnailPicker = true
+                } label: {
                     Label(thumbnailActionTitle, systemImage: "photo.on.rectangle")
                 }
+                .buttonStyle(.borderless)
                 .disabled(uploadingThumbnail)
 
                 Spacer()
@@ -1349,6 +1363,8 @@ private struct LessonEditorSheet: View {
                     } label: {
                         Label("Убрать", systemImage: "trash")
                     }
+                    // Без .borderless тап по «Заменить обложку» заодно стирал обложку.
+                    .buttonStyle(.borderless)
                     .disabled(uploadingThumbnail)
                 }
             }

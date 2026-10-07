@@ -23,6 +23,21 @@ class IOSCourseClientUISourceTests(unittest.TestCase):
         self.assertIn("GalleryVideoPicker(", editor)
         self.assertNotIn("PhotosPicker(selection: $videoItem, matching: .videos)", editor)
 
+    def test_lesson_cover_gallery_is_presented_from_one_place(self):
+        # Сборка 246: в одной строке Form стояли два PhotosPicker обложки урока,
+        # тап по строке открывал оба → галерея «вылетала» и открывалась снова.
+        editor = (ROOT / "X5" / "Views" / "CourseEditorView.swift").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertNotIn("PhotosPicker(selection: $thumbnailItem", editor)
+        self.assertEqual(
+            editor.count(
+                ".photosPicker(isPresented: $showingThumbnailPicker, selection: $thumbnailItem"
+            ),
+            1,
+        )
+
     def test_courseup_header_and_every_real_course_have_developer_editor_action(self):
         courses = (ROOT / "X5" / "Views" / "CoursesView.swift").read_text(
             encoding="utf-8"
