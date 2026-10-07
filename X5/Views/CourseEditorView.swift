@@ -80,7 +80,16 @@ struct CourseEditorView: View {
 
     @State private var coverItem: PhotosPickerItem?
     @State private var coverPreviewData: Data?
+    // Готовая картинка для показа: раньше UIImage(data:) декодировал полное
+    // фото с камеры при КАЖДОЙ перерисовке формы → редактор «жестко тупил».
+    @State private var coverPreviewImage: UIImage?
+    // Галерея обложки курса — один флаг и один .photosPicker на весь экран
+    // (а не PhotosPicker внутри строки Form, который «моргал» и открывался заново).
+    @State private var showingCoverPicker = false
     @State private var uploadingCover = false
+    /// Модуль, который ждёт подтверждения удаления (id, а не индекс: индексы
+    /// сдвигаются, пока открыт диалог).
+    @State private var pendingCategoryDeleteId: String?
 
     @State private var lessonEditor: LessonEditorTarget?
     @State private var didPopulate = false
@@ -241,9 +250,31 @@ struct CourseEditorView: View {
                     authorName = defaultAuthorName
                 }
             }
+            .photosPicker(isPresented: $showingCoverPicker, selection: $coverItem, matching: .images)
             .onChange(of: coverItem) { newValue in
                 guard let newValue else { return }
                 Task { await loadCoverPreview(newValue) }
+            }
+            // Удаление модуля — только после явного «Удалить». Раньше тап по
+            // строке модуля мог сам нажать «Удалить модуль» (см. lessonsSection).
+            .confirmationDialog(
+                "Удалить модуль?",
+                isPresented: Binding(
+                    get: { pendingCategoryDeleteId != nil },
+                    set: { if !$0 { pendingCategoryDeleteId = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Удалить модуль и его уроки", role: .destructive) {
+                    if let id = pendingCategoryDeleteId,
+                       let index = categories.firstIndex(where: { $0.id == id }) {
+                        deleteCategory(index)
+                    }
+                    pendingCategoryDeleteId = nil
+                }
+                Button("Отмена", role: .cancel) { pendingCategoryDeleteId = nil }
+            } message: {
+                Text("Модуль пропадёт у учеников после сохранения курса.")
             }
             .task {
                 await loadCourseAuthors()
@@ -256,9 +287,11 @@ struct CourseEditorView: View {
 
     @ViewBuilder
     private var coverPicker: some View {
-        PhotosPicker(selection: $coverItem, matching: .images) {
+        Button {
+            showingCoverPicker = true
+        } label: {
             ZStack {
-                if let data = coverPreviewData, let img = UIImage(data: data) {
+                if let img = coverPreviewImage {
                     Image(uiImage: img).resizable().scaledToFill()
                 } else if let url = coverUrl, !url.isEmpty, let u = URL(string: url) {
                     CachedAsyncImage(url: u) { image in
@@ -277,7 +310,11 @@ struct CourseEditorView: View {
             .frame(maxWidth: .infinity)
             .frame(height: 200)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            // clipShape режет только картинку, не область тапа: scaledToFill
+            // вылезает за рамку. contentShape держит тап внутри карточки.
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
+        .buttonStyle(.borderless)
     }
 
     private var placeholder: some View {
@@ -356,6 +393,12 @@ struct CourseEditorView: View {
                             } label: {
                                 Label("Добавить урок", systemImage: "plus.circle")
                             }
+                            // Весь модуль — ОДНА строка Form. Кнопки со стилем по
+                            // умолчанию в строке срабатывают ВСЕ разом от любого тапа
+                            // по ней: «Добавить урок» + «Добавить день» + «Удалить
+                            // модуль». Отсюда «модули удаляются» и лишние «День N».
+                            // .borderless — каждая кнопка жмётся только сама.
+                            .buttonStyle(.borderless)
                         }
                         .padding(.vertical, 6)
                         .padding(.leading, 8)
@@ -367,15 +410,19 @@ struct CourseEditorView: View {
                         } label: {
                             Label("Добавить день / блок", systemImage: "calendar.badge.plus")
                         }
+                        .buttonStyle(.borderless)
 
                         Spacer()
 
                         if categories.count > 1 {
                             Button(role: .destructive) {
-                                deleteCategory(categoryIndex)
+                                // Сначала спрашиваем: модуль с уроками не должен
+                                // пропадать от случайного тапа.
+                                pendingCategoryDeleteId = categories[categoryIndex].id
                             } label: {
                                 Label("Удалить модуль", systemImage: "trash")
                             }
+                            .buttonStyle(.borderless)
                         }
                     }
                     .font(.footnote)
@@ -511,11 +558,14 @@ struct CourseEditorView: View {
     }
 
     private func loadCoverPreview(_ item: PhotosPickerItem) async {
-        if let data = try? await item.loadTransferable(type: Data.self),
-           let ui = UIImage(data: data),
-           let jpeg = ui.jpegData(compressionQuality: 0.85) {
-            coverPreviewData = jpeg
-        }
+        guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+        // Ужимаем вне главного потока: полное фото 12+ Мп декодируется заметно.
+        let prepared = await Task.detached(priority: .userInitiated) {
+            CourseCoverImage.prepare(data)
+        }.value
+        guard let prepared else { return }
+        coverPreviewData = prepared.jpeg
+        coverPreviewImage = prepared.preview
     }
 
     private func save() async {
@@ -582,6 +632,7 @@ struct CourseEditorView: View {
             uploadingCover = false
             coverUrl = uploadedCoverURL
             coverPreviewData = nil
+            coverPreviewImage = nil
         }
 
         guard await uploadPendingLessonVideos(courseId: id, accessToken: token) else {
@@ -1073,6 +1124,9 @@ private struct LessonEditorTarget: Identifiable {
 
 private struct LessonDraftRow: View {
     let lesson: EditableLesson
+    /// Мини-копия новой обложки (58×38). Делается один раз в .task, а не
+    /// UIImage(data:) в body: тот декодировал фото на каждую букву в названии модуля.
+    @State private var pendingThumb: UIImage?
 
     var body: some View {
         HStack(spacing: 12) {
@@ -1096,12 +1150,21 @@ private struct LessonDraftRow: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 4)
+        .task(id: lesson.pendingThumbnailData) {
+            guard let data = lesson.pendingThumbnailData else {
+                pendingThumb = nil
+                return
+            }
+            pendingThumb = await Task.detached(priority: .utility) {
+                CourseCoverImage.prepare(data, maxPixelSize: 160)?.preview
+            }.value
+        }
     }
 
     @ViewBuilder
     private var lessonThumb: some View {
         ZStack {
-            if let data = lesson.pendingThumbnailData, let img = UIImage(data: data) {
+            if lesson.pendingThumbnailData != nil, let img = pendingThumb {
                 Image(uiImage: img).resizable().scaledToFill()
             } else if let url = URL(string: lesson.thumbnailUrl), !lesson.thumbnailUrl.x5Trimmed.isEmpty {
                 CachedAsyncImage(url: url) { image in
@@ -1152,6 +1215,8 @@ private struct LessonEditorSheet: View {
     @State private var pendingVideoFileURL: URL?
     @State private var pendingVideoFileName: String?
     @State private var pendingThumbnailData: Data?
+    /// Готовая картинка новой обложки — чтобы не декодировать JPEG в body.
+    @State private var pendingThumbnailImage: UIImage?
     @State private var showingVideoPicker = false
     @State private var thumbnailItem: PhotosPickerItem?
     // Один флаг на одну галерею обложки: раньше в строке Form стояли два
@@ -1282,6 +1347,14 @@ private struct LessonEditorSheet: View {
             }
             // Галерея обложки показывается только отсюда — одна презентация на весь экран.
             .photosPicker(isPresented: $showingThumbnailPicker, selection: $thumbnailItem, matching: .images)
+            .task {
+                // Урок открыли повторно до сохранения курса: обложка уже выбрана,
+                // готовим картинку для показа один раз.
+                guard pendingThumbnailImage == nil, let data = pendingThumbnailData else { return }
+                pendingThumbnailImage = await Task.detached(priority: .userInitiated) {
+                    UIImage(data: data)
+                }.value
+            }
             .onChange(of: thumbnailItem) { newValue in
                 guard let newValue else { return }
                 Task { await importThumbnail(newValue) }
@@ -1321,7 +1394,7 @@ private struct LessonEditorSheet: View {
                 showingThumbnailPicker = true
             } label: {
                 ZStack {
-                    if let data = pendingThumbnailData, let img = UIImage(data: data) {
+                    if pendingThumbnailData != nil, let img = pendingThumbnailImage {
                         Image(uiImage: img).resizable().scaledToFill()
                     } else if let url = URL(string: thumbnailUrl), !thumbnailUrl.x5Trimmed.isEmpty {
                         CachedAsyncImage(url: url) { image in
@@ -1341,6 +1414,8 @@ private struct LessonEditorSheet: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: 154)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                // Тап только внутри карточки: scaledToFill вылезает за рамку.
+                .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
             .buttonStyle(.borderless)
             .disabled(uploadingThumbnail)
@@ -1359,6 +1434,10 @@ private struct LessonEditorSheet: View {
                 if pendingThumbnailData != nil || !thumbnailUrl.x5Trimmed.isEmpty {
                     Button(role: .destructive) {
                         pendingThumbnailData = nil
+                        pendingThumbnailImage = nil
+                        // Сброс выбора: иначе то же фото повторно не выбрать —
+                        // onChange(of: thumbnailItem) не сработает.
+                        thumbnailItem = nil
                         thumbnailUrl = ""
                     } label: {
                         Label("Убрать", systemImage: "trash")
@@ -1429,14 +1508,21 @@ private struct LessonEditorSheet: View {
         defer { uploadingThumbnail = false }
         errorText = nil
 
-        guard let data = try? await item.loadTransferable(type: Data.self),
-              let ui = UIImage(data: data),
-              let jpeg = ui.jpegData(compressionQuality: 0.84) else {
+        guard let data = try? await item.loadTransferable(type: Data.self) else {
+            errorText = "Не удалось прочитать обложку."
+            return
+        }
+        // Ужимаем до 1600 px вне главного потока (см. CourseCoverImage).
+        let prepared = await Task.detached(priority: .userInitiated) {
+            CourseCoverImage.prepare(data)
+        }.value
+        guard let prepared else {
             errorText = "Не удалось прочитать обложку."
             return
         }
 
-        pendingThumbnailData = jpeg
+        pendingThumbnailData = prepared.jpeg
+        pendingThumbnailImage = prepared.preview
     }
 
     private func commitAndDismiss() {

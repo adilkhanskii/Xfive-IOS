@@ -1526,6 +1526,8 @@ private struct LessonRow: View {
         .padding(.vertical, 10)
         .background(Color.white.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        // Тап по уроку — только в границах его карточки (см. coverCard).
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     /// Обложка во всю ширину строки, 16:9 (как кадр видео), те же цвета
@@ -1545,8 +1547,15 @@ private struct LessonRow: View {
                     coverPlaceholder
                 }
             }
+            // scaledToFill у высокой картинки вылезает за рамку 16:9 вверх и вниз.
+            // clipShape режет только то, что видно, а НЕ область тапа: невидимый
+            // край обложки ложился на кнопку модуля выше, и тап по ней открывал
+            // урок вместо «свернуть модуль» (Адильхан, сборка 246). Картинка тапы
+            // не ловит, а тап по самой карточке задаёт contentShape ниже.
+            .allowsHitTesting(false)
             .overlay {
                 LinearGradient(colors: [.black.opacity(0.04), .black.opacity(0.34)], startPoint: .top, endPoint: .bottom)
+                    .allowsHitTesting(false)
             }
             .overlay {
                 Image(systemName: statusIcon)
@@ -1557,6 +1566,7 @@ private struct LessonRow: View {
                     .clipShape(Circle())
             }
             .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
 
     private var coverPlaceholder: some View {

@@ -37,6 +37,66 @@ class IOSCourseClientUISourceTests(unittest.TestCase):
             ),
             1,
         )
+        # Обложка курса — тот же приём: без PhotosPicker внутри строки Form.
+        self.assertNotIn("PhotosPicker(selection: $coverItem", editor)
+        self.assertEqual(
+            editor.count(".photosPicker(isPresented: $showingCoverPicker, selection: $coverItem"),
+            1,
+        )
+
+    def test_module_row_tap_cannot_delete_module(self):
+        # Гарантийный баг «модули удаляются» (сборка 246): весь модуль — одна
+        # строка Form, и кнопки со стилем по умолчанию срабатывали ВСЕ от одного
+        # тапа: «Добавить урок» + «Добавить день» + «Удалить модуль».
+        editor = (ROOT / "X5" / "Views" / "CourseEditorView.swift").read_text(
+            encoding="utf-8"
+        )
+        start = editor.index("private var lessonsSection: some View")
+        end = editor.index("private func populate()", start)
+        section = editor[start:end]
+
+        for label in (
+            'Label("Добавить урок"',
+            'Label("Добавить день / блок"',
+            'Label("Удалить модуль"',
+        ):
+            at = section.index(label)
+            tail = section[at:]
+            next_button = tail.find("Button", 1)
+            style = tail.find(".buttonStyle(.borderless)")
+            self.assertNotEqual(style, -1, label)
+            if next_button != -1:
+                self.assertLess(style, next_button, f"{label} без .borderless")
+
+        # Кнопка в строке только ставит вопрос; удаляет — подтверждение.
+        delete_at = section.index('Label("Удалить модуль"')
+        delete_button = section[section.rindex("Button(role: .destructive)", 0, delete_at):delete_at]
+        self.assertIn("pendingCategoryDeleteId = categories[categoryIndex].id", delete_button)
+        self.assertNotIn("deleteCategory(", delete_button)
+        self.assertIn('"Удалить модуль?"', editor)
+        self.assertIn("deleteCategory(index)", editor)
+
+    def test_viewer_lesson_cover_does_not_steal_module_header_taps(self):
+        # Сборка 246: обложка 16:9 (scaledToFill) невидимо вылезала за рамку на
+        # кнопку модуля, и тап «свернуть модуль» открывал урок.
+        courses = (ROOT / "X5" / "Views" / "CoursesView.swift").read_text(
+            encoding="utf-8"
+        )
+        start = courses.index("private var coverCard: some View")
+        end = courses.index("private var coverPlaceholder: some View", start)
+        card = courses[start:end]
+        self.assertIn(".allowsHitTesting(false)", card)
+        self.assertIn(".contentShape(RoundedRectangle(cornerRadius: 9", card)
+
+    def test_picked_course_covers_are_downscaled_once(self):
+        # «Жестко тупит»: полное фото с камеры декодировалось в body на каждую
+        # перерисовку. Теперь обложка ужимается один раз сразу после выбора.
+        editor = (ROOT / "X5" / "Views" / "CourseEditorView.swift").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("UIImage(data: data)", editor.split("struct LessonEditorSheet")[0])
+        self.assertNotIn("let img = UIImage(data:", editor)
+        self.assertGreaterEqual(editor.count("CourseCoverImage.prepare("), 3)
 
     def test_courseup_header_and_every_real_course_have_developer_editor_action(self):
         courses = (ROOT / "X5" / "Views" / "CoursesView.swift").read_text(
