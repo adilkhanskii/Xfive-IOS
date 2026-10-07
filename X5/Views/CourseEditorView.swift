@@ -547,6 +547,15 @@ struct CourseEditorView: View {
             return
         }
 
+        // Checkpoint: write modules and lessons BEFORE the cover and the slow
+        // video upload. Otherwise a failed or interrupted upload leaves the
+        // course with `categories = []` and the new module is lost.
+        saveStage = .savingCourse
+        guard await persistCourseStructure(courseId: id, accessToken: token) else {
+            markSaveFailed(service.error ?? "Не удалось сохранить модули курса.")
+            return
+        }
+
         if let jpeg = coverPreviewData {
             uploadingCover = true
             saveStage = .uploadingCover
@@ -558,15 +567,6 @@ struct CourseEditorView: View {
             uploadingCover = false
             coverUrl = uploadedCoverURL
             coverPreviewData = nil
-        }
-
-        // Checkpoint: write modules and lessons BEFORE the slow video upload.
-        // Otherwise a failed or interrupted upload leaves the course with
-        // `categories = []` and the new module is lost.
-        saveStage = .savingCourse
-        guard await persistCourseStructure(courseId: id, accessToken: token) else {
-            markSaveFailed(service.error ?? "Не удалось сохранить модули курса.")
-            return
         }
 
         guard await uploadPendingLessonVideos(courseId: id, accessToken: token) else {
@@ -613,8 +613,9 @@ struct CourseEditorView: View {
             "cover_url": coverUrl?.x5Trimmed.isEmpty == false ? (coverUrl ?? "") : NSNull(),
             "price": priceInt,
             "is_free": isFree,
-            // A brand-new course stays hidden until the final save succeeds.
-            "is_public": publishAsChosen ? isPublic : (isPublic && editing != nil),
+            // Checkpoints never change visibility: a new course stays hidden and
+            // an existing one keeps its server state until the final save.
+            "is_public": publishAsChosen ? isPublic : (editing?.isPublic ?? false),
             "course_language": courseLanguage,
             "categories": categoriesPayload()
         ]
