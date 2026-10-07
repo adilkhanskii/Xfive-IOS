@@ -72,13 +72,19 @@ enum CourseVideoUploadPolicy {
     static let directUploadLimitBytes: Int64 = 47_000_000
     static let transcodeTargetBytes: Int64 = 45_000_000
 
-    static let uploadGuidance = "Минимум 720p. До 47 МБ загружается без перекодирования; большие файлы подготавливаются в HD. Длинные ролики разделите на уроки до 7 минут, чтобы не терять качество."
+    static let uploadGuidance = "Минимум 720p. Видео подготавливается в HD (H.264, быстрый старт). Длинные ролики разделите на уроки до 7 минут, чтобы не терять качество."
+
+    /// Bunny Stream lessons keep the original file; Bunny encodes adaptive
+    /// HLS (1080p/720p/480p) itself, so no on-device transcoding or size cap.
+    static let bunnyUploadGuidance = "Минимум 720p. Оригинал загружается без сжатия, сервер сам готовит качество 1080p/720p/480p. Длинные уроки можно загружать целиком."
 
     private static let targetPayloadFraction = 0.90
     private static let audioBitRate = 96_000
     private static let minimumVideoBitRate = 700_000
     private static let maximumVideoBitRate = 2_800_000
 
+    /// True when a file is too large to upload to Supabase Storage as is.
+    /// Preparation itself always re-encodes (see CourseVideoUploadPreparer).
     static func requiresTranscoding(fileSizeBytes: Int64) -> Bool {
         fileSizeBytes > directUploadLimitBytes
     }
@@ -86,7 +92,8 @@ enum CourseVideoUploadPolicy {
     static func makeEncodingPlan(
         durationSeconds: Double,
         presentationWidth: Double,
-        presentationHeight: Double
+        presentationHeight: Double,
+        sourceBytes: Int64? = nil
     ) throws -> CourseVideoEncodingPlan {
         guard durationSeconds.isFinite,
               durationSeconds > 0,
@@ -102,8 +109,20 @@ enum CourseVideoUploadPolicy {
             (Double(transcodeTargetBytes) * 8 * targetPayloadFraction)
                 / durationSeconds
         )
+        // Never inflate a small, already efficient file: cap at the source
+        // average bitrate (but not below the HD floor).
+        var bitRateCeiling = maximumVideoBitRate
+        if let sourceBytes, sourceBytes > 0 {
+            let sourceBitRate = Int(
+                (Double(sourceBytes) * 8) / durationSeconds
+            ) - audioBitRate
+            bitRateCeiling = min(
+                bitRateCeiling,
+                max(minimumVideoBitRate, sourceBitRate)
+            )
+        }
         let videoBitRate = min(
-            maximumVideoBitRate,
+            bitRateCeiling,
             totalBitRate - audioBitRate
         )
         guard videoBitRate >= minimumVideoBitRate else {
@@ -297,13 +316,11 @@ final class CourseVideoUploadPreparer {
         fileURL: URL,
         progress: @escaping ProgressHandler = { _ in }
     ) async throws -> URL {
+        // Always re-encode for the Supabase path, even below 47 MB: iPhone
+        // sources are often HEVC/HDR .mov without faststart, which Android,
+        // the web player and progressive download handle badly. The output is
+        // H.264 + AAC .mp4 with the moov atom first (optimizeForNetworkUse).
         let sourceSize = try Self.fileSize(at: fileURL)
-        guard CourseVideoUploadPolicy.requiresTranscoding(
-            fileSizeBytes: sourceSize
-        ) else {
-            progress(1)
-            return fileURL
-        }
 
         let sourceAsset = AVURLAsset(url: fileURL)
         let sourceDurationTime = try await sourceAsset.load(.duration)
@@ -328,7 +345,8 @@ final class CourseVideoUploadPreparer {
         let plan = try CourseVideoUploadPolicy.makeEncodingPlan(
             durationSeconds: sourceDuration,
             presentationWidth: presentationWidth,
-            presentationHeight: presentationHeight
+            presentationHeight: presentationHeight,
+            sourceBytes: sourceSize
         )
 
         let outputURL = CourseVideoStaging.preparedUploadURL(for: fileURL)

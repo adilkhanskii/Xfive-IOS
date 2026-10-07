@@ -2,57 +2,44 @@ import Foundation
 import XCTest
 @testable import X5
 
-#if X5_ENABLE_BUNNY_COURSE_VIDEO_UPLOAD
-// Dormant implementation tests. The release target intentionally does not
-// define X5_ENABLE_BUNNY_COURSE_VIDEO_UPLOAD; source contracts verify that
-// default separately.
+// Bunny Stream upload client. The path is enabled at runtime by
+// app_feature_flags.bunny_course_video_upload; these tests cover the client
+// contract with create-course-video-upload.
 final class BunnyStreamResumableVideoUploaderTests: XCTestCase {
-    func testFutureOptInRouteWouldKeepSmallVideoOnSupabase() {
-        XCTAssertFalse(
-            CourseLessonVideoUploadRoute.shouldUseBunny(
-                fileSizeBytes: CourseVideoUploadPolicy.directUploadLimitBytes
-            )
-        )
-    }
-
-    func testFutureOptInRouteWouldSendOriginalLargeVideoToBunny() {
-        XCTAssertTrue(
-            CourseLessonVideoUploadRoute.shouldUseBunny(
-                fileSizeBytes:
-                    CourseVideoUploadPolicy.directUploadLimitBytes + 1
-            )
-        )
-    }
-
-    func testUploadKeyIsStableButScopedToPurposeAndResource() {
+    func testUploadKeyIsStableButScopedToCourseLessonAndFile() {
         let first = BunnyStreamUploadKey.scoped(
-            purpose: .lessonVideo,
-            resourceID: "course-1-lesson-1",
+            courseID: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
+            lessonID: "lesson_1",
             uploadIdentity: "0123456789abcdef"
         )
         let retry = BunnyStreamUploadKey.scoped(
-            purpose: .lessonVideo,
-            resourceID: "course-1-lesson-1",
+            courseID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            lessonID: "lesson_1",
             uploadIdentity: "0123456789abcdef"
         )
         let otherLesson = BunnyStreamUploadKey.scoped(
-            purpose: .lessonVideo,
-            resourceID: "course-1-lesson-2",
+            courseID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            lessonID: "lesson_2",
             uploadIdentity: "0123456789abcdef"
         )
-        let submission = BunnyStreamUploadKey.scoped(
-            purpose: .courseSubmission,
-            resourceID: "course-1-lesson-1",
-            uploadIdentity: "0123456789abcdef"
+        let otherFile = BunnyStreamUploadKey.scoped(
+            courseID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            lessonID: "lesson_1",
+            uploadIdentity: "fedcba9876543210"
         )
 
         XCTAssertEqual(first, retry)
-        XCTAssertEqual(first.count, 16)
+        XCTAssertEqual(first.count, 19)
+        XCTAssertTrue(first.hasPrefix("lv_"))
+        XCTAssertNotNil(
+            first.range(of: "^[A-Za-z0-9_-]{16,128}$", options: .regularExpression),
+            "server accepts only [A-Za-z0-9_-]{16,128}"
+        )
         XCTAssertNotEqual(first, otherLesson)
-        XCTAssertNotEqual(first, submission)
+        XCTAssertNotEqual(first, otherFile)
     }
 
-    func testTicketDecodesOnlyTheOfficialBunnyTUSEndpointAndPlaybackURL() throws {
+    func testTicketDecodesOnlyTheOfficialBunnyTUSEndpoint() throws {
         let ticket = try JSONDecoder().decode(
             BunnyStreamUploadTicket.self,
             from: Data(validTicketJSON.utf8)
@@ -61,10 +48,6 @@ final class BunnyStreamResumableVideoUploaderTests: XCTestCase {
         XCTAssertEqual(
             ticket.tusEndpoint.absoluteString,
             "https://video.bunnycdn.com/tusupload"
-        )
-        XCTAssertEqual(
-            ticket.playbackURL.absoluteString,
-            "https://x5-stream.b-cdn.net/123e4567-e89b-42d3-a456-426614174000/playlist.m3u8"
         )
         XCTAssertEqual(
             ticket.transientHeaders,
@@ -89,6 +72,25 @@ final class BunnyStreamResumableVideoUploaderTests: XCTestCase {
                 BunnyStreamUploadTicket.self,
                 from: Data(json.utf8)
             )
+        )
+    }
+
+    func testResponseDecodesUploadOrAlreadyUploaded() throws {
+        let upload = try BunnyStreamTicketResponse.decode(
+            Data(validTicketJSON.utf8)
+        )
+        XCTAssertEqual(upload.videoID, "123e4567-e89b-42d3-a456-426614174000")
+        guard case .upload = upload else {
+            return XCTFail("expected a TUS ticket")
+        }
+
+        let done = try BunnyStreamTicketResponse.decode(Data("""
+        {"video_id":"123E4567-E89B-42D3-A456-426614174000","library_id":"321",
+         "status":"ready","upload_required":false}
+        """.utf8))
+        XCTAssertEqual(
+            done,
+            .alreadyUploaded(videoID: "123e4567-e89b-42d3-a456-426614174000")
         )
     }
 
@@ -150,10 +152,10 @@ final class BunnyStreamResumableVideoUploaderTests: XCTestCase {
             }
         )
 
-        let ticket = try await client.createTicket(
-            purpose: .lessonVideo,
-            uploadKey: "0123456789abcdef",
-            resourceID: "course-1-lesson-1",
+        let response = try await client.createTicket(
+            courseID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            lessonID: "lesson_1",
+            uploadKey: "lv_0123456789abcdef",
             title: "Lesson 1",
             fileName: "lesson.mov",
             contentType: "video/quicktime",
@@ -161,7 +163,7 @@ final class BunnyStreamResumableVideoUploaderTests: XCTestCase {
             accessToken: "access-token"
         )
 
-        XCTAssertEqual(ticket.videoID, "123e4567-e89b-42d3-a456-426614174000")
+        XCTAssertEqual(response.videoID, "123e4567-e89b-42d3-a456-426614174000")
         XCTAssertEqual(recorder.requestCount, 2)
         XCTAssertEqual(recorder.delays, [3])
         XCTAssertEqual(
@@ -228,7 +230,7 @@ final class BunnyStreamResumableVideoUploaderTests: XCTestCase {
           "library_id": "321",
           "authorization_signature": "\(String(repeating: "a", count: 64))",
           "authorization_expire": 1900021600,
-          "playback_url": "https://x5-stream.b-cdn.net/123e4567-e89b-42d3-a456-426614174000/playlist.m3u8"
+          "upload_required": true
         }
         """
     }
@@ -327,4 +329,3 @@ private final class BunnyTicketURLProtocol: URLProtocol {
 
     override func stopLoading() {}
 }
-#endif

@@ -665,7 +665,7 @@ struct CourseEditorView: View {
 
                     saveStage = .uploadingVideo(current: uploaded + 1, total: total)
                     let lessonId = categories[categoryIndex].days[dayIndex].lessons[lessonIndex].id
-                    guard let publicURL = await service.uploadLessonVideo(
+                    guard let uploadResult = await service.uploadLessonVideo(
                         courseId: courseId,
                         lessonId: lessonId,
                         fileURL: fileURL,
@@ -683,7 +683,7 @@ struct CourseEditorView: View {
 
                     CourseVideoStaging.removeIfManaged(fileURL)
                     categories[categoryIndex].days[dayIndex].lessons[lessonIndex]
-                        .markVideoUploadSucceeded(publicURL: publicURL)
+                        .markVideoUploadSucceeded(uploadResult)
                     uploaded += 1
                     // Keep the uploaded URL on the server even if a later video fails.
                     let checkpointToken = await auth.accessTokenForUpload() ?? accessToken
@@ -1192,6 +1192,10 @@ private struct LessonEditorSheet: View {
                         }
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                    } else if lesson.bunnyVideoID != nil {
+                        Label(lesson.videoLabel, systemImage: "play.rectangle.on.rectangle")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
 
                     Text(CourseVideoUploadPolicy.uploadGuidance)
@@ -1351,7 +1355,11 @@ private struct LessonEditorSheet: View {
 
     private var videoImportTitle: String {
         if uploading { return "Подготовка видео..." }
-        if pendingVideoFileURL != nil || !videoUrl.x5Trimmed.isEmpty { return "Заменить видео из галереи" }
+        if pendingVideoFileURL != nil
+            || !videoUrl.x5Trimmed.isEmpty
+            || lesson.bunnyVideoID != nil {
+            return "Заменить видео из галереи"
+        }
         return "Выбрать видео из галереи"
     }
 

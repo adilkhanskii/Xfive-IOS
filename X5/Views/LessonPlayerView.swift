@@ -1,34 +1,25 @@
 import SwiftUI
 import AVKit
 
-/// Plays lesson video. Supports direct mp4/HLS via AVPlayer; YouTube falls back to system browser.
+/// Plays lesson video. Bunny Stream lessons get a short-lived signed HLS URL
+/// from `course-video-playback` (entitlement checked on the server); older
+/// lessons keep their direct mp4/HLS URL; YouTube falls back to the browser.
 struct LessonPlayerView: View {
     let lesson: CourseLesson
-
-    @StateObject private var playback: CourseVideoPlaybackController
-    @State private var isFullScreenPresented = false
-    @State private var viewport = VideoViewportState()
-
-    init(lesson: CourseLesson) {
-        self.lesson = lesson
-
-        let directURL = lesson.playableURL.flatMap {
-            Self.isYouTubeURL($0) ? nil : $0
-        }
-        _playback = StateObject(
-            wrappedValue: CourseVideoPlaybackController(url: directURL)
-        )
-    }
+    let courseID: String
 
     var body: some View {
         VStack(spacing: 0) {
-            if let url = lesson.playableURL {
+            switch lesson.videoSource {
+            case .bunny:
+                BunnyLessonVideoLoader(lesson: lesson, courseID: courseID)
+            case .direct(let url):
                 if Self.isYouTubeURL(url) {
                     YouTubeFallbackView(url: url, title: lesson.title)
                 } else {
-                    directVideo(playback)
+                    LessonVideoSurface(url: url, refreshURL: nil)
                 }
-            } else {
+            case .missing:
                 ContentUnavailable(systemImage: "play.slash", title: "Video not uploaded yet", subtitle: "This lesson does not have a video yet. Check back soon.")
             }
         }
@@ -38,8 +29,140 @@ struct LessonPlayerView: View {
         .background(Color.black.ignoresSafeArea())
     }
 
-    @ViewBuilder
-    private func directVideo(_ playback: CourseVideoPlaybackController) -> some View {
+    static func isYouTubeURL(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        return host == "youtu.be"
+            || host == "youtube.com"
+            || host.hasSuffix(".youtube.com")
+    }
+}
+
+/// Requests the signed HLS URL, then hands it to the regular AVPlayer surface.
+private struct BunnyLessonVideoLoader: View {
+    let lesson: CourseLesson
+    let courseID: String
+
+    @EnvironmentObject private var auth: Auth
+    @State private var phase: Phase = .loading
+
+    private enum Phase: Equatable {
+        case loading
+        case ready(URL)
+        case message(icon: String, title: String, subtitle: String)
+    }
+
+    var body: some View {
+        Group {
+            switch phase {
+            case .loading:
+                ProgressView()
+                    .tint(.white)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .ready(let url):
+                LessonVideoSurface(url: url, refreshURL: makeRefresher())
+            case let .message(icon, title, subtitle):
+                VStack(spacing: 16) {
+                    ContentUnavailable(systemImage: icon, title: title, subtitle: subtitle)
+                    Button("Повторить") {
+                        phase = .loading
+                        Task { await load() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+        }
+        .task { await load() }
+    }
+
+    private func load() async {
+        switch await Self.fetch(auth: auth, courseID: courseID, lessonID: lesson.id) {
+        case .ready(let url, _):
+            phase = .ready(url)
+        case .processing:
+            phase = .message(
+                icon: "hourglass",
+                title: "Видео обрабатывается",
+                subtitle: "Готовим качество 1080p/720p/480p. Обычно это занимает несколько минут."
+            )
+        case .notEntitled:
+            phase = .message(
+                icon: "lock.fill",
+                title: "Урок закрыт",
+                subtitle: "Купите курс или этот урок, чтобы смотреть видео."
+            )
+        case .notAuthenticated:
+            phase = .message(
+                icon: "person.crop.circle.badge.exclamationmark",
+                title: "Нужно войти",
+                subtitle: "Войдите в аккаунт, чтобы смотреть этот урок."
+            )
+        case .failed:
+            phase = .message(
+                icon: "exclamationmark.triangle",
+                title: "Видео не обработалось",
+                subtitle: "Автор курса скоро загрузит его заново."
+            )
+        case .unavailable:
+            phase = .message(
+                icon: "wifi.exclamationmark",
+                title: "Видео временно недоступно",
+                subtitle: "Проверьте интернет и повторите."
+            )
+        }
+    }
+
+    /// Captures the environment object while the body is evaluated, so the
+    /// player can ask for a fresh signed URL later without touching the view.
+    private func makeRefresher() -> CourseVideoPlaybackController.URLRefresher {
+        let auth = auth
+        let courseID = courseID
+        let lessonID = lesson.id
+        return {
+            let result = await Self.fetch(
+                auth: auth,
+                courseID: courseID,
+                lessonID: lessonID
+            )
+            if case .ready(let url, _) = result { return url }
+            return nil
+        }
+    }
+
+    private static func fetch(
+        auth: Auth,
+        courseID: String,
+        lessonID: String
+    ) async -> CourseVideoPlaybackResult {
+        let token = await auth.freshAccessToken(
+            invalidateSessionOnCredentialFailure: false
+        )
+        return await CourseVideoPlaybackClient(
+            baseURL: X5Config.supabaseBaseURL,
+            anonKey: X5Config.supabaseAnonKey
+        ).fetch(
+            courseID: courseID,
+            lessonID: lessonID,
+            accessToken: token
+        )
+    }
+}
+
+/// AVPlayer surface with quality menu, full screen and connection status.
+private struct LessonVideoSurface: View {
+    @StateObject private var playback: CourseVideoPlaybackController
+    @State private var isFullScreenPresented = false
+    @State private var viewport = VideoViewportState()
+
+    init(url: URL, refreshURL: CourseVideoPlaybackController.URLRefresher?) {
+        _playback = StateObject(
+            wrappedValue: CourseVideoPlaybackController(
+                url: url,
+                refreshURL: refreshURL
+            )
+        )
+    }
+
+    var body: some View {
         ZStack {
             VideoPlayer(player: playback.player)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -80,13 +203,6 @@ struct LessonPlayerView: View {
         }) {
             FullScreenVideoPlayer(playback: playback, viewport: $viewport)
         }
-    }
-
-    private static func isYouTubeURL(_ url: URL) -> Bool {
-        guard let host = url.host?.lowercased() else { return false }
-        return host == "youtu.be"
-            || host == "youtube.com"
-            || host.hasSuffix(".youtube.com")
     }
 }
 

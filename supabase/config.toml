@@ -22,3 +22,17 @@ verify_jwt = false
 # X5_PORTFOLIO_MODERATION_SWEEP_SECRET used by the signed pg_net sweep.
 [functions.moderate-portfolio]
 verify_jwt = false
+
+# Bunny Stream course video playback. Guests may request free lessons with the
+# anon key; user JWTs are verified inside the handler via Supabase Auth.
+[functions.course-video-playback]
+verify_jwt = false
+
+# Bunny Stream webhook + pg_cron reconciler (X-X5-Reconcile-Secret, value in
+# Vault 'x5_course_video_cron_secret' and env COURSE_VIDEO_CRON_SECRET).
+[functions.course-video-status]
+verify_jwt = false
+
+# No-rebuild Bunny mirror (pg_cron / operator with X-X5-Reconcile-Secret).
+[functions.course-video-bunny-mirror]
+verify_jwt = false

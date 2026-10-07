@@ -1,38 +1,29 @@
 import Foundation
-
-#if X5_ENABLE_BUNNY_COURSE_VIDEO_UPLOAD
 import TUSKit
 
-// Quarantined future source. Build 192 does not define
-// X5_ENABLE_BUNNY_COURSE_VIDEO_UPLOAD, so none of this client path is compiled.
-// Do not enable it until private, entitlement-checked playback plus provider
-// readiness, moderation, and orphan/account-deletion cleanup are implemented.
-
-enum CourseLessonVideoUploadRoute {
-    static func shouldUseBunny(fileSizeBytes: Int64) -> Bool {
-        fileSizeBytes > CourseVideoUploadPolicy.directUploadLimitBytes
-    }
-}
-
-enum BunnyStreamUploadPurpose: String, Encodable {
-    case lessonVideo = "lesson_video"
-    case courseSubmission = "course_submission"
-}
+// Bunny Stream lesson upload (original file, resumable TUS). Enabled at
+// runtime by public.app_feature_flags key "bunny_course_video_upload"
+// (see CourseVideoFeatureFlags); the server enforces the same flag. The
+// Bunny API key never reaches the app: create-course-video-upload returns a
+// short-lived TUS signature only. Playback goes through
+// course-video-playback (entitlement-checked, token-signed HLS).
 
 enum BunnyStreamUploadKey {
+    /// Stable per (course, lesson, file) so a retry after a crash or network
+    /// loss resumes the same Bunny video instead of creating a new one.
     static func scoped(
-        purpose: BunnyStreamUploadPurpose,
-        resourceID: String,
+        courseID: String,
+        lessonID: String,
         uploadIdentity: String
     ) -> String {
         let identity =
-            "\(purpose.rawValue)|\(resourceID)|\(uploadIdentity)"
+            "lesson_video|\(courseID.lowercased())|\(lessonID)|\(uploadIdentity)"
         let hash = identity.utf8.reduce(
             UInt64(14_695_981_039_346_656_037)
         ) {
             ($0 ^ UInt64($1)) &* 1_099_511_628_211
         }
-        return String(format: "%016llx", hash)
+        return "lv_" + String(format: "%016llx", hash)
     }
 }
 
@@ -43,6 +34,7 @@ enum BunnyStreamVideoUploadError: Error, Equatable, LocalizedError {
     case serviceUnavailable
     case invalidTicket
     case uploadFailed
+    case rateLimited
 
     var errorDescription: String? {
         switch self {
@@ -58,6 +50,8 @@ enum BunnyStreamVideoUploadError: Error, Equatable, LocalizedError {
             return "Сервер вернул неверные параметры загрузки видео."
         case .uploadFailed:
             return "Загрузка видео не завершилась. Можно повторить без повторного выбора файла."
+        case .rateLimited:
+            return "Слишком много загрузок подряд. Подождите минуту и повторите."
         }
     }
 }
@@ -68,7 +62,6 @@ struct BunnyStreamUploadTicket: Decodable, Equatable {
     let libraryID: String
     let authorizationSignature: String
     let authorizationExpire: Int
-    let playbackURL: URL
 
     enum CodingKeys: String, CodingKey {
         case tusEndpoint = "tus_endpoint"
@@ -76,7 +69,6 @@ struct BunnyStreamUploadTicket: Decodable, Equatable {
         case libraryID = "library_id"
         case authorizationSignature = "authorization_signature"
         case authorizationExpire = "authorization_expire"
-        case playbackURL = "playback_url"
     }
 
     init(from decoder: Decoder) throws {
@@ -92,7 +84,6 @@ struct BunnyStreamUploadTicket: Decodable, Equatable {
             Int.self,
             forKey: .authorizationExpire
         )
-        let playback = try container.decode(URL.self, forKey: .playbackURL)
 
         let normalizedVideoID = rawVideoID.lowercased()
         let decimal = CharacterSet(charactersIn: "0123456789")
@@ -113,13 +104,7 @@ struct BunnyStreamUploadTicket: Decodable, Equatable {
               signature.unicodeScalars.allSatisfy({
                   hexadecimal.contains($0)
               }),
-              expire > 0,
-              playback.scheme?.lowercased() == "https",
-              playback.host?.lowercased().hasSuffix(".b-cdn.net") == true,
-              playback.path
-                == "/\(normalizedVideoID)/playlist.m3u8",
-              playback.query == nil,
-              playback.fragment == nil
+              expire > 0
         else {
             throw BunnyStreamVideoUploadError.invalidTicket
         }
@@ -129,7 +114,6 @@ struct BunnyStreamUploadTicket: Decodable, Equatable {
         libraryID = rawLibraryID
         authorizationSignature = signature.lowercased()
         authorizationExpire = expire
-        playbackURL = playback
     }
 
     var transientHeaders: [String: String] {
@@ -146,19 +130,56 @@ struct BunnyStreamUploadTicket: Decodable, Equatable {
     }
 }
 
+/// Server answer: either a TUS ticket, or "bytes already arrived" for a
+/// replayed upload key whose video is already processing / ready at Bunny.
+enum BunnyStreamTicketResponse: Equatable {
+    case upload(BunnyStreamUploadTicket)
+    case alreadyUploaded(videoID: String)
+
+    var videoID: String {
+        switch self {
+        case .upload(let ticket): return ticket.videoID
+        case .alreadyUploaded(let videoID): return videoID
+        }
+    }
+
+    static func decode(_ data: Data) throws -> BunnyStreamTicketResponse {
+        struct Probe: Decodable {
+            let videoID: String
+            let uploadRequired: Bool?
+
+            enum CodingKeys: String, CodingKey {
+                case videoID = "video_id"
+                case uploadRequired = "upload_required"
+            }
+        }
+        let probe = try JSONDecoder().decode(Probe.self, from: data)
+        if probe.uploadRequired == false {
+            let videoID = probe.videoID.lowercased()
+            guard UUID(uuidString: videoID) != nil else {
+                throw BunnyStreamVideoUploadError.invalidTicket
+            }
+            return .alreadyUploaded(videoID: videoID)
+        }
+        return .upload(
+            try JSONDecoder().decode(BunnyStreamUploadTicket.self, from: data)
+        )
+    }
+}
+
 private struct BunnyStreamTicketRequest: Encodable {
-    let purpose: BunnyStreamUploadPurpose
+    let courseID: String
+    let lessonID: String
     let uploadKey: String
-    let resourceID: String
     let title: String
     let fileName: String
     let contentType: String
     let sourceBytes: Int64
 
     enum CodingKeys: String, CodingKey {
-        case purpose
+        case courseID = "course_id"
+        case lessonID = "lesson_id"
         case uploadKey = "upload_key"
-        case resourceID = "resource_id"
         case title
         case fileName = "file_name"
         case contentType = "content_type"
@@ -215,15 +236,15 @@ final class BunnyStreamUploadTicketClient {
     }
 
     func createTicket(
-        purpose: BunnyStreamUploadPurpose,
+        courseID: String,
+        lessonID: String,
         uploadKey: String,
-        resourceID: String,
         title: String,
         fileName: String,
         contentType: String,
         sourceBytes: Int64,
         accessToken: String
-    ) async throws -> BunnyStreamUploadTicket {
+    ) async throws -> BunnyStreamTicketResponse {
         let token = accessToken.trimmingCharacters(
             in: .whitespacesAndNewlines
         )
@@ -248,9 +269,9 @@ final class BunnyStreamUploadTicketClient {
         )
         request.httpBody = try JSONEncoder().encode(
             BunnyStreamTicketRequest(
-                purpose: purpose,
+                courseID: courseID.lowercased(),
+                lessonID: lessonID,
                 uploadKey: uploadKey,
-                resourceID: resourceID,
                 title: title,
                 fileName: fileName,
                 contentType: contentType,
@@ -272,10 +293,7 @@ final class BunnyStreamUploadTicketClient {
             switch http.statusCode {
             case 200..<300:
                 do {
-                    return try JSONDecoder().decode(
-                        BunnyStreamUploadTicket.self,
-                        from: data
-                    )
+                    return try BunnyStreamTicketResponse.decode(data)
                 } catch {
                     throw BunnyStreamVideoUploadError.invalidTicket
                 }
@@ -283,6 +301,8 @@ final class BunnyStreamUploadTicketClient {
                 throw BunnyStreamVideoUploadError.missingAccessToken
             case 403:
                 throw BunnyStreamVideoUploadError.notAuthorized
+            case 429:
+                throw BunnyStreamVideoUploadError.rateLimited
             case 425
                 where attempt <
                     BunnyStreamTicketRetryPolicy.maxInProgressRetries:
@@ -348,7 +368,6 @@ struct BunnyStreamTUSUploadDescriptor {
     let chunkSize: Int
     let context: [String: String]
     let persistentHeaders: [String: String]
-    let playbackURL: URL
     let uploadIdentity: String
     let videoID: String
 
@@ -386,7 +405,6 @@ struct BunnyStreamTUSUploadDescriptor {
             "videoId": ticket.videoID,
         ]
         persistentHeaders = [:]
-        playbackURL = ticket.playbackURL
         self.uploadIdentity = normalizedIdentity
         videoID = ticket.videoID
     }
@@ -424,17 +442,20 @@ final class BunnyStreamResumableVideoUploader {
         self.stateStore = stateStore
     }
 
+    /// Uploads the original file and returns the Bunny video GUID. The
+    /// lesson stores that GUID (videoProvider = "bunny"); it is not a
+    /// playable URL by itself.
     func upload(
         sourceFileURL: URL,
         uploadIdentity: String,
-        purpose: BunnyStreamUploadPurpose,
-        resourceID: String,
+        courseID: String,
+        lessonID: String,
         title: String,
         contentType: String,
         accessToken: String,
         accessTokenProvider: AccessTokenProvider? = nil,
         progress: @escaping ProgressHandler
-    ) async throws -> URL {
+    ) async throws -> String {
         guard let sourceBytes = try sourceFileURL.resourceValues(
             forKeys: [.fileSizeKey]
         ).fileSize,
@@ -448,20 +469,20 @@ final class BunnyStreamResumableVideoUploader {
             ? "course-video.mp4"
             : sourceFileURL.lastPathComponent
         let scopedUploadKey = BunnyStreamUploadKey.scoped(
-            purpose: purpose,
-            resourceID: resourceID,
+            courseID: courseID,
+            lessonID: lessonID,
             uploadIdentity: uploadIdentity
         )
 
-        let ticketProvider: () async throws -> BunnyStreamUploadTicket = {
+        let responseProvider: () async throws -> BunnyStreamTicketResponse = {
             [ticketClient] in
             let candidate = await resolvedTokenProvider()
             let token = (try? Self.normalizedAccessToken(candidate ?? ""))
                 ?? initialToken
             return try await ticketClient.createTicket(
-                purpose: purpose,
+                courseID: courseID,
+                lessonID: lessonID,
                 uploadKey: scopedUploadKey,
-                resourceID: resourceID,
                 title: title,
                 fileName: fileName,
                 contentType: contentType,
@@ -469,8 +490,26 @@ final class BunnyStreamResumableVideoUploader {
                 accessToken: token
             )
         }
+        let ticketProvider: () async throws -> BunnyStreamUploadTicket = {
+            switch try await responseProvider() {
+            case .upload(let ticket):
+                return ticket
+            case .alreadyUploaded:
+                // Bunny already has every byte; the running TUS session will
+                // finish on its own HEAD/PATCH round trip.
+                throw BunnyStreamVideoUploadError.uploadFailed
+            }
+        }
 
-        let ticket = try await ticketProvider()
+        let ticket: BunnyStreamUploadTicket
+        switch try await responseProvider() {
+        case .alreadyUploaded(let videoID):
+            stateStore.clear(for: scopedUploadKey)
+            progress(1)
+            return videoID
+        case .upload(let fresh):
+            ticket = fresh
+        }
         stateStore.save(videoID: ticket.videoID, for: scopedUploadKey)
         let descriptor = try BunnyStreamTUSUploadDescriptor(
             ticket: ticket,
@@ -487,7 +526,9 @@ final class BunnyStreamResumableVideoUploader {
         )
 
         let sessionKey = UUID()
-        return try await withCheckedThrowingContinuation { continuation in
+        let videoID = ticket.videoID
+        try await withCheckedThrowingContinuation {
+            (continuation: CheckedContinuation<Void, Error>) in
             do {
                 let session = try BunnyStreamUploadSession(
                     descriptor: descriptor,
@@ -507,6 +548,7 @@ final class BunnyStreamResumableVideoUploader {
                 continuation.resume(throwing: error)
             }
         }
+        return videoID
     }
 
     private static func normalizedAccessToken(
@@ -567,7 +609,7 @@ private final class BunnyStreamUploadSession:
     private let ticketVault: BunnyStreamTicketVault
     private let progressHandler:
         BunnyStreamResumableVideoUploader.ProgressHandler
-    private let completion: (Result<URL, Error>) -> Void
+    private let completion: (Result<Void, Error>) -> Void
     private let client: TUSClient
     private var activeUploadID: UUID?
     private var sourceFileURL: URL?
@@ -582,7 +624,7 @@ private final class BunnyStreamUploadSession:
         ticketVault: BunnyStreamTicketVault,
         progress: @escaping
             BunnyStreamResumableVideoUploader.ProgressHandler,
-        completion: @escaping (Result<URL, Error>) -> Void
+        completion: @escaping (Result<Void, Error>) -> Void
     ) throws {
         self.descriptor = descriptor
         self.ticketVault = ticketVault
@@ -663,7 +705,7 @@ private final class BunnyStreamUploadSession:
         guard id == activeUploadID else { return }
         markResumeActivity()
         progressHandler(1)
-        finish(.success(descriptor.playbackURL))
+        finish(.success(()))
     }
 
     func uploadFailed(
@@ -780,7 +822,7 @@ private final class BunnyStreamUploadSession:
         }
     }
 
-    private func finish(_ result: Result<URL, Error>) {
+    private func finish(_ result: Result<Void, Error>) {
         guard !isFinished else { return }
         isFinished = true
         resumeWatchdog?.cancel()
@@ -804,4 +846,3 @@ private final class BunnyStreamUploadSession:
         .appendingPathComponent(String(hash, radix: 16), isDirectory: true)
     }
 }
-#endif
