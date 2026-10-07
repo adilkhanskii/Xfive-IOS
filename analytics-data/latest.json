@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-10-07T12:44:06.344740Z",
+  "generatedAt": "2026-10-07T18:40:43.575378Z",
   "sync": {
     "status": "preparing",
-    "message": "Apple Analytics временно недоступен",
-    "detail": "Apple API временно недоступен; синхронизация повторится автоматически."
+    "message": "Apple готовит исторические отчёты",
+    "detail": "Исторический snapshot запрошен; Apple формирует сегменты."
   },
   "overview": {
     "downloads": {
@@ -49,11 +49,95 @@
   ],
   "trend": [],
   "countries": [],
-  "builds": [],
+  "builds": [
+    {
+      "platform": "iOS",
+      "version": "1.1.12",
+      "build": "246",
+      "status": "IN_BETA_TESTING",
+      "processingState": "VALID",
+      "uploadedDate": "2026-10-07T09:08:50-07:00"
+    },
+    {
+      "platform": "iOS",
+      "version": "1.1.12",
+      "build": "243",
+      "status": "VALID",
+      "processingState": "VALID",
+      "uploadedDate": "2026-09-16T01:14:51-07:00"
+    },
+    {
+      "platform": "iOS",
+      "version": "1.1.11",
+      "build": "242",
+      "status": "VALID",
+      "processingState": "VALID",
+      "uploadedDate": "2026-09-14T05:58:49-07:00"
+    },
+    {
+      "platform": "iOS",
+      "version": "1.1.10",
+      "build": "241",
+      "status": "VALID",
+      "processingState": "VALID",
+      "uploadedDate": "2026-09-11T05:17:09-07:00"
+    },
+    {
+      "platform": "iOS",
+      "version": "1.1.9",
+      "build": "240",
+      "status": "VALID",
+      "processingState": "VALID",
+      "uploadedDate": "2026-09-07T01:02:16-07:00"
+    },
+    {
+      "platform": "iOS",
+      "version": "1.1.9",
+      "build": "239",
+      "status": "VALID",
+      "processingState": "VALID",
+      "uploadedDate": "2026-09-05T23:52:19-07:00"
+    },
+    {
+      "platform": "iOS",
+      "version": "1.1.8",
+      "build": "238",
+      "status": "VALID",
+      "processingState": "VALID",
+      "uploadedDate": "2026-09-01T05:15:31-07:00"
+    },
+    {
+      "platform": "iOS",
+      "version": "1.1.7",
+      "build": "237",
+      "status": "VALID",
+      "processingState": "VALID",
+      "uploadedDate": "2026-08-31T07:03:26-07:00"
+    },
+    {
+      "platform": "iOS",
+      "version": "1.1.6",
+      "build": "236",
+      "status": "VALID",
+      "processingState": "VALID",
+      "uploadedDate": "2026-08-30T17:48:50-07:00"
+    },
+    {
+      "platform": "iOS",
+      "version": "1.1.6",
+      "build": "235",
+      "status": "VALID",
+      "processingState": "VALID",
+      "uploadedDate": "2026-08-29T09:24:57-07:00"
+    }
+  ],
   "sources": {
     "apple": {
       "status": "preparing",
-      "detail": "Apple API временно недоступен; синхронизация повторится автоматически."
+      "detail": "Исторический snapshot запрошен; Apple формирует сегменты.",
+      "warnings": [
+        "Некоторые отчёты Apple пока недоступны; синхронизация повторится автоматически."
+      ]
     },
     "google": {
       "status": "not_connected",
