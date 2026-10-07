@@ -1445,8 +1445,23 @@ private struct LessonRow: View {
     var separatePrice: Int? = nil
     let requestUnlock: () -> Void
     @EnvironmentObject private var loc: LocalizationService
+    @EnvironmentObject private var auth: Auth
+    @State private var bunnyThumbnailURL: URL?
 
     var hasVideo: Bool { lesson.hasAnyVideo }
+
+    /// Обложка урока: своя (thumbnailUrl) или авто-превью Bunny.
+    private var coverURL: URL? { lesson.safeThumbnailURL ?? bunnyThumbnailURL }
+
+    /// Большая карточка 16:9 — когда обложка есть или может прийти от Bunny.
+    /// Раньше обложка была 58×38 и текст на ней не читался (Адильхан).
+    private var showsCoverCard: Bool {
+        lesson.safeThumbnailURL != nil || lesson.bunnyVideoID != nil
+    }
+
+    private var statusIcon: String {
+        !hasVideo ? "doc.text" : (canPlay ? "play.fill" : "lock.fill")
+    }
 
     var body: some View {
         Group {
@@ -1460,42 +1475,51 @@ private struct LessonRow: View {
                     .buttonStyle(.plain)
             }
         }
+        .task(id: lesson.id) { await loadBunnyThumbnailIfNeeded() }
     }
 
     private var content: some View {
-        HStack(spacing: 12) {
-            lessonThumbnail
+        VStack(alignment: .leading, spacing: 10) {
+            if showsCoverCard {
+                coverCard
+            }
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(lesson.title)
-                    .font(.system(size: 14))
-                    .foregroundColor(.white)
-                    .lineLimit(2)
-                HStack(spacing: 8) {
-                    if lesson.freePreview {
-                        Text(loc.t("courses_free_preview"))
-                            .font(.system(size: 9, weight: .heavy))
-                            .padding(.horizontal, 5).padding(.vertical, 2)
-                            .background(X5Style.blue.opacity(0.18))
-                            .foregroundColor(.accentColor)
-                            .clipShape(Capsule())
-                    }
-                    if let separatePrice {
-                        Text(loc.t("courses_lesson_price_badge")
-                            .replacingOccurrences(of: "{price}", with: separatePrice.formatted()))
-                            .font(.system(size: 9, weight: .heavy))
-                            .padding(.horizontal, 5).padding(.vertical, 2)
-                            .background(Color.accentColor.opacity(0.18))
-                            .foregroundColor(.accentColor)
-                            .clipShape(Capsule())
+            HStack(spacing: 12) {
+                if !showsCoverCard {
+                    compactIcon
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(lesson.title)
+                        .font(.system(size: showsCoverCard ? 15 : 14, weight: showsCoverCard ? .semibold : .regular))
+                        .foregroundColor(.white)
+                        .lineLimit(2)
+                    HStack(spacing: 8) {
+                        if lesson.freePreview {
+                            Text(loc.t("courses_free_preview"))
+                                .font(.system(size: 9, weight: .heavy))
+                                .padding(.horizontal, 5).padding(.vertical, 2)
+                                .background(X5Style.blue.opacity(0.18))
+                                .foregroundColor(.accentColor)
+                                .clipShape(Capsule())
+                        }
+                        if let separatePrice {
+                            Text(loc.t("courses_lesson_price_badge")
+                                .replacingOccurrences(of: "{price}", with: separatePrice.formatted()))
+                                .font(.system(size: 9, weight: .heavy))
+                                .padding(.horizontal, 5).padding(.vertical, 2)
+                                .background(Color.accentColor.opacity(0.18))
+                                .foregroundColor(.accentColor)
+                                .clipShape(Capsule())
+                        }
                     }
                 }
-            }
-            Spacer()
-            if canPlay && hasVideo {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.3))
+                Spacer()
+                if canPlay && hasVideo {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.3))
+                }
             }
         }
         .padding(.horizontal, 12)
@@ -1504,34 +1528,84 @@ private struct LessonRow: View {
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
-    @ViewBuilder
-    private var lessonThumbnail: some View {
-        if let url = lesson.safeThumbnailURL {
-            ZStack {
-                CachedAsyncImage(url: url) { image in
-                    image.resizable().scaledToFill()
-                } placeholder: {
-                    Color.white.opacity(0.06)
+    /// Обложка во всю ширину строки, 16:9 (как кадр видео), те же цвета
+    /// и скругления, что были у мини-превью. Пока грузится / не загрузилась /
+    /// у Bunny ещё нет кадра — аккуратная заглушка, а не пустой прямоугольник.
+    private var coverCard: some View {
+        Color.clear
+            .aspectRatio(16.0 / 9.0, contentMode: .fit)
+            .overlay {
+                if let url = coverURL {
+                    CachedAsyncImage(url: url) { image in
+                        image.resizable().scaledToFill()
+                    } placeholder: {
+                        coverPlaceholder
+                    }
+                } else {
+                    coverPlaceholder
                 }
+            }
+            .overlay {
                 LinearGradient(colors: [.black.opacity(0.04), .black.opacity(0.34)], startPoint: .top, endPoint: .bottom)
-                Image(systemName: !hasVideo ? "doc.text" : (canPlay ? "play.fill" : "lock.fill"))
-                    .font(.system(size: 10, weight: .bold))
+            }
+            .overlay {
+                Image(systemName: statusIcon)
+                    .font(.system(size: 16, weight: .bold))
                     .foregroundColor(canPlay ? .black : .white.opacity(0.82))
-                    .frame(width: 22, height: 22)
+                    .frame(width: 44, height: 44)
                     .background(canPlay ? Color.accentColor : Color.white.opacity(0.14))
                     .clipShape(Circle())
             }
-            .frame(width: 58, height: 38)
             .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-        } else {
-            ZStack {
-                Circle().fill(Color.white.opacity(0.06))
-                Image(systemName: !hasVideo ? "doc.text" : (canPlay ? "play.fill" : "lock.fill"))
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(canPlay ? .accentColor : .white.opacity(0.45))
-            }
-            .frame(width: 32, height: 32)
+    }
+
+    private var coverPlaceholder: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color.white.opacity(0.08), Color.white.opacity(0.03)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            Image(systemName: "film")
+                .font(.system(size: 28, weight: .regular))
+                .foregroundColor(.white.opacity(0.16))
         }
+    }
+
+    private var compactIcon: some View {
+        ZStack {
+            Circle().fill(Color.white.opacity(0.06))
+            Image(systemName: statusIcon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(canPlay ? .accentColor : .white.opacity(0.45))
+        }
+        .frame(width: 32, height: 32)
+    }
+
+    /// Bunny-урок без своей обложки: берём авто-кадр Bunny (подписанная
+    /// ссылка из course-video-playback). Только для открытых уроков — для
+    /// закрытых сервер всё равно ответит 403, лишний запрос не шлём.
+    // идея: кэшировать превью по videoID без токена в ссылке, чтобы не
+    // перекачивать картинку при каждом входе в курс.
+    @MainActor
+    private func loadBunnyThumbnailIfNeeded() async {
+        guard bunnyThumbnailURL == nil,
+              lesson.safeThumbnailURL == nil,
+              lesson.bunnyVideoID != nil,
+              canPlay
+        else { return }
+        let token = await auth.freshAccessToken(
+            invalidateSessionOnCredentialFailure: false
+        )
+        let url = await CourseVideoPlaybackClient(
+            baseURL: X5Config.supabaseBaseURL,
+            anonKey: X5Config.supabaseAnonKey
+        ).fetchThumbnailURL(
+            courseID: courseID,
+            lessonID: lesson.id,
+            accessToken: token
+        )
+        if let url { bunnyThumbnailURL = url }
     }
 }
 
@@ -1602,7 +1676,8 @@ private struct CourseSubmissionView: View {
                     if isSending, let progress = service.videoUploadProgress {
                         ProgressView(value: progress)
                             .tint(.accentColor)
-                        Text("Загрузка видео: \(Int((progress * 100).rounded()))%")
+                        // NaN/∞ в Int(...) = вылет — подстраховка.
+                        Text("Загрузка видео: \(progress.isFinite ? Int((min(max(progress, 0), 1) * 100).rounded()) : 0)%")
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }

@@ -141,6 +141,66 @@ struct CourseVideoPlaybackClient {
         lessonID: String,
         accessToken: String?
     ) async -> CourseVideoPlaybackResult {
+        let request = makeRequest(
+            courseID: courseID,
+            lessonID: lessonID,
+            accessToken: accessToken
+        )
+        guard let (data, response) = try? await session.data(for: request),
+              let http = response as? HTTPURLResponse
+        else {
+            return .unavailable
+        }
+        return Self.parse(statusCode: http.statusCode, data: data)
+    }
+
+    /// Подписанная превьюшка Bunny для строки урока без своей обложки.
+    /// Тот же ответ course-video-playback (thumbnail_url), поэтому доступ
+    /// проверяет сервер: закрытым урокам превью не отдаётся (403 → nil).
+    func fetchThumbnailURL(
+        courseID: String,
+        lessonID: String,
+        accessToken: String?
+    ) async -> URL? {
+        let request = makeRequest(
+            courseID: courseID,
+            lessonID: lessonID,
+            accessToken: accessToken
+        )
+        guard let (data, response) = try? await session.data(for: request),
+              let http = response as? HTTPURLResponse
+        else {
+            return nil
+        }
+        return Self.parseThumbnailURL(statusCode: http.statusCode, data: data)
+    }
+
+    static func parseThumbnailURL(statusCode: Int, data: Data) -> URL? {
+        struct Body: Decodable {
+            let thumbnailURL: String?
+
+            enum CodingKeys: String, CodingKey {
+                case thumbnailURL = "thumbnail_url"
+            }
+        }
+        // Только наш Bunny CDN по https — как и для HLS в parse(...).
+        guard statusCode == 200,
+              let body = try? JSONDecoder().decode(Body.self, from: data),
+              let raw = body.thumbnailURL,
+              let url = URL(string: raw),
+              url.scheme?.lowercased() == "https",
+              url.host?.lowercased().hasSuffix(".b-cdn.net") == true
+        else {
+            return nil
+        }
+        return url
+    }
+
+    private func makeRequest(
+        courseID: String,
+        lessonID: String,
+        accessToken: String?
+    ) -> URLRequest {
         var request = URLRequest(
             url: baseURL.appendingPathComponent(
                 "functions/v1/course-video-playback"
@@ -160,13 +220,7 @@ struct CourseVideoPlaybackClient {
             "course_id": courseID.lowercased(),
             "lesson_id": lessonID,
         ])
-
-        guard let (data, response) = try? await session.data(for: request),
-              let http = response as? HTTPURLResponse
-        else {
-            return .unavailable
-        }
-        return Self.parse(statusCode: http.statusCode, data: data)
+        return request
     }
 
     static func parse(statusCode: Int, data: Data) -> CourseVideoPlaybackResult {

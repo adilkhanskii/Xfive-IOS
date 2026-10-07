@@ -157,7 +157,11 @@ struct CourseEditorView: View {
                     }
                 }
 
+                // Пока идёт сохранение (видео 1–2 ГБ грузится минутами), уроки
+                // и модули не трогаем: удаление/перестановка посреди загрузки
+                // ломала индексы в uploadPendingLessonVideos → вылет приложения.
                 lessonsSection
+                    .disabled(saving)
 
                 if !isCreating {
                     Section {
@@ -166,6 +170,7 @@ struct CourseEditorView: View {
                         } label: {
                             Label("Удалить курс", systemImage: "trash")
                         }
+                        .disabled(saving)
                     } footer: {
                         Text("Удаление необратимо.")
                     }
@@ -461,7 +466,9 @@ struct CourseEditorView: View {
                 Spacer(minLength: 0)
                 if case .uploadingVideo = saveStage,
                    let progress = service.videoUploadProgress {
-                    Text("\(Int((progress * 100).rounded()))%")
+                    // NaN/∞ в Int(...) = мгновенный вылет; прогресс приходит из
+                    // сторонних экспортёров, поэтому подстраховка здесь.
+                    Text("\(progress.isFinite ? Int((min(max(progress, 0), 1) * 100).rounded()) : 0)%")
                         .font(.caption.monospacedDigit().weight(.bold))
                 }
             }
@@ -523,7 +530,15 @@ struct CourseEditorView: View {
             return
         }
         saving = true
-        defer { saving = false }
+        // Сжатие + загрузка длинного урока идут минутами. Если экран гаснет,
+        // iOS усыпляет приложение посреди экспорта/TUS и может выгрузить его
+        // из памяти — для автора это выглядит как «приложение закрылось».
+        // идея: beginBackgroundTask + фоновая URLSession для Bunny-загрузки.
+        UIApplication.shared.isIdleTimerDisabled = true
+        defer {
+            saving = false
+            UIApplication.shared.isIdleTimerDisabled = false
+        }
 
         var courseId = existingId
 
@@ -649,80 +664,92 @@ struct CourseEditorView: View {
     }
 
     private func uploadPendingLessonVideos(courseId: String, accessToken: String) async -> Bool {
-        let total = categories
+        // Снимок очереди ДО долгих await: загрузка 1–2 ГБ идёт минутами, а
+        // `categories` за это время может поменяться. Старый код писал
+        // результат по индексам, снятым до await → «Index out of range» =
+        // вылет. Теперь после каждой загрузки урок ищем заново по id.
+        let pending = categories
             .flatMap(\.days)
             .flatMap(\.lessons)
-            .filter { $0.pendingVideoFileURL != nil }
-            .count
+            .compactMap { lesson in
+                lesson.pendingVideoFileURL.map { (lessonId: lesson.id, fileURL: $0) }
+            }
+        let total = pending.count
         var uploaded = 0
 
-        for categoryIndex in categories.indices {
-            for dayIndex in categories[categoryIndex].days.indices {
-                for lessonIndex in categories[categoryIndex].days[dayIndex].lessons.indices {
-                    guard let fileURL = categories[categoryIndex].days[dayIndex].lessons[lessonIndex].pendingVideoFileURL else {
-                        continue
-                    }
-
-                    saveStage = .uploadingVideo(current: uploaded + 1, total: total)
-                    let lessonId = categories[categoryIndex].days[dayIndex].lessons[lessonIndex].id
-                    guard let uploadResult = await service.uploadLessonVideo(
-                        courseId: courseId,
-                        lessonId: lessonId,
-                        fileURL: fileURL,
-                        accessToken: accessToken,
-                        accessTokenProvider: {
-                            await auth.accessTokenForUpload()
-                        }
-                    ) else {
-                        markSaveFailed(
-                            (service.error ?? "Не удалось загрузить видео урока.")
-                                + " Модули и уроки сохранены. Исправьте видео и нажмите «Сохранить» ещё раз."
-                        )
-                        return false
-                    }
-
-                    CourseVideoStaging.removeIfManaged(fileURL)
-                    categories[categoryIndex].days[dayIndex].lessons[lessonIndex]
-                        .markVideoUploadSucceeded(uploadResult)
-                    uploaded += 1
-                    // Keep the uploaded URL on the server even if a later video fails.
-                    let checkpointToken = await auth.accessTokenForUpload() ?? accessToken
-                    _ = await persistCourseStructure(courseId: courseId, accessToken: checkpointToken)
+        for item in pending {
+            saveStage = .uploadingVideo(current: uploaded + 1, total: total)
+            guard let uploadResult = await service.uploadLessonVideo(
+                courseId: courseId,
+                lessonId: item.lessonId,
+                fileURL: item.fileURL,
+                accessToken: accessToken,
+                accessTokenProvider: {
+                    await auth.accessTokenForUpload()
                 }
+            ) else {
+                markSaveFailed(
+                    (service.error ?? "Не удалось загрузить видео урока.")
+                        + " Модули и уроки сохранены. Исправьте видео и нажмите «Сохранить» ещё раз."
+                )
+                return false
             }
+
+            CourseVideoStaging.removeIfManaged(item.fileURL)
+            // Урок могли удалить или заменить ему видео, пока шла загрузка —
+            // тогда результат не пишем, чтобы не затереть чужие данные.
+            if let path = lessonPath(id: item.lessonId),
+               categories[path.category].days[path.day].lessons[path.lesson]
+                .pendingVideoFileURL == item.fileURL {
+                categories[path.category].days[path.day].lessons[path.lesson]
+                    .markVideoUploadSucceeded(uploadResult)
+            }
+            uploaded += 1
+            // Keep the uploaded URL on the server even if a later video fails.
+            let checkpointToken = await auth.accessTokenForUpload() ?? accessToken
+            _ = await persistCourseStructure(courseId: courseId, accessToken: checkpointToken)
         }
         return true
     }
 
     private func uploadPendingLessonThumbnails(courseId: String, accessToken: String) async -> Bool {
-        let total = categories
+        // Та же защита от устаревших индексов, что и у видео (см. выше).
+        let pending = categories
             .flatMap(\.days)
             .flatMap(\.lessons)
-            .filter { $0.pendingThumbnailData != nil }
-            .count
+            .compactMap { lesson in
+                lesson.pendingThumbnailData.map { (lessonId: lesson.id, jpegData: $0) }
+            }
+        let total = pending.count
         var uploaded = 0
 
+        for item in pending {
+            saveStage = .uploadingLessonCover(current: uploaded + 1, total: total)
+            guard let publicURL = await service.uploadLessonThumbnail(courseId: courseId, lessonId: item.lessonId, jpegData: item.jpegData, accessToken: accessToken) else {
+                markSaveFailed(service.error ?? "Не удалось загрузить обложку урока.")
+                return false
+            }
+
+            if let path = lessonPath(id: item.lessonId) {
+                categories[path.category].days[path.day].lessons[path.lesson]
+                    .markThumbnailUploadSucceeded(publicURL: publicURL)
+            }
+            uploaded += 1
+        }
+        return true
+    }
+
+    /// Где урок лежит сейчас (после await). nil — урок удалили.
+    private func lessonPath(id lessonId: String) -> (category: Int, day: Int, lesson: Int)? {
         for categoryIndex in categories.indices {
             for dayIndex in categories[categoryIndex].days.indices {
-                for lessonIndex in categories[categoryIndex].days[dayIndex].lessons.indices {
-                    guard let jpegData = categories[categoryIndex].days[dayIndex].lessons[lessonIndex].pendingThumbnailData else {
-                        continue
-                    }
-
-                    saveStage = .uploadingLessonCover(current: uploaded + 1, total: total)
-                    let lessonId = categories[categoryIndex].days[dayIndex].lessons[lessonIndex].id
-                    guard let publicURL = await service.uploadLessonThumbnail(courseId: courseId, lessonId: lessonId, jpegData: jpegData, accessToken: accessToken) else {
-                        markSaveFailed(service.error ?? "Не удалось загрузить обложку урока.")
-                        return false
-                    }
-
-                    categories[categoryIndex].days[dayIndex].lessons[lessonIndex]
-                        .markThumbnailUploadSucceeded(publicURL: publicURL)
-                    uploaded += 1
+                if let lessonIndex = categories[categoryIndex].days[dayIndex].lessons
+                    .firstIndex(where: { $0.id == lessonId }) {
+                    return (categoryIndex, dayIndex, lessonIndex)
                 }
             }
         }
-        return true
+        return nil
     }
 
     private func markSaveFailed(_ message: String) {

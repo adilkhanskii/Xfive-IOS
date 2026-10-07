@@ -710,6 +710,9 @@ final class CourseVideoUploadPreparer {
     }
 
     private static func boundedProgress(_ fraction: Double) -> Double {
-        min(max(fraction, 0), 1)
+        // NaN проходит через min/max насквозь (NextLevel считает прогресс
+        // делением по PTS) и дальше роняет Int(...) в UI — режем здесь.
+        guard fraction.isFinite else { return 0 }
+        return min(max(fraction, 0), 1)
     }
 }

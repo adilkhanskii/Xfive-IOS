@@ -177,6 +177,33 @@ final class CourseVideoDeliveryTests: XCTestCase {
         XCTAssertEqual(foreign, .unavailable)
     }
 
+    func testThumbnailAcceptsOnlySignedBunnyCDN() {
+        let signed = "https://vz-test.b-cdn.net/bcdn_token=abc&expires=1900007200&token_path=%2F\(videoID)%2F/\(videoID)/thumbnail.jpg"
+        let url = CourseVideoPlaybackClient.parseThumbnailURL(
+            statusCode: 200,
+            data: Data(#"{"hls_url":"x","expires_at":1,"thumbnail_url":"\#(signed)"}"#.utf8)
+        )
+        XCTAssertEqual(url?.lastPathComponent, "thumbnail.jpg")
+
+        // Чужой хост, http, нет поля, не-200 — превью нет (заглушка в UI).
+        XCTAssertNil(CourseVideoPlaybackClient.parseThumbnailURL(
+            statusCode: 200,
+            data: Data(#"{"thumbnail_url":"https://evil.example.com/t.jpg"}"#.utf8)
+        ))
+        XCTAssertNil(CourseVideoPlaybackClient.parseThumbnailURL(
+            statusCode: 200,
+            data: Data(#"{"thumbnail_url":"http://vz-test.b-cdn.net/t.jpg"}"#.utf8)
+        ))
+        XCTAssertNil(CourseVideoPlaybackClient.parseThumbnailURL(
+            statusCode: 200,
+            data: Data(#"{"thumbnail_url":null}"#.utf8)
+        ))
+        XCTAssertNil(CourseVideoPlaybackClient.parseThumbnailURL(
+            statusCode: 403,
+            data: Data(#"{"thumbnail_url":"\#(signed)"}"#.utf8)
+        ))
+    }
+
     func testPlaybackStatusMapping() {
         let empty = Data("{}".utf8)
         XCTAssertEqual(CourseVideoPlaybackClient.parse(statusCode: 202, data: empty), .processing)
