@@ -41,6 +41,8 @@ struct ChatThreadView: View {
     /// Bumped when ChatsLocalState mutations happen via the header menu so the
     /// view rereads `isMuted/isPinned` for icon toggles without observing.
     @State private var chatStateTick: Int = 0
+    /// Первая прокрутка вниз — без анимации (чат сразу открывается на последнем сообщении).
+    @State private var didInitialScroll: Bool = false
 
     init(chat: ChatRoom, initialOther: UserProfile? = nil) {
         self.chat = chat
@@ -252,6 +254,11 @@ struct ChatThreadView: View {
                     ForEach(Array(visibleMessages.enumerated()), id: \.element.id) { pair in
                         messageRow(message: pair.element, index: pair.offset)
                     }
+                    // Якорь «низ ленты»: прокручиваем к нему, а не к id сообщения —
+                    // так работает, даже если последнее сообщение скрыто («удалить у себя»).
+                    Color.clear
+                        .frame(height: 1)
+                        .id(Self.bottomAnchorID)
                 }
                 .padding(.horizontal, 14)
                 .padding(.top, 12)
@@ -259,10 +266,40 @@ struct ChatThreadView: View {
                 .frame(maxWidth: 640)
                 .frame(maxWidth: .infinity)
             }
-            .onChange(of: messages.count) { _ in
-                if let last = messages.last {
-                    withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+            .modifier(ChatBottomAnchorModifier())
+            // Было: onChange(messages.count) → «Показать более ранние» тоже меняло
+            // count и кидало ленту вниз; при открытии кэш и свежие данные одного
+            // размера не вызывали прокрутку, чат оставался сверху/посередине.
+            // Теперь следим за ПОСЛЕДНИМ видимым сообщением: подгрузка старых его не меняет.
+            .onChange(of: visibleMessages.last?.id) { _ in
+                scrollToBottom(proxy, animated: didInitialScroll)
+                didInitialScroll = true
+            }
+            .onAppear {
+                scrollToBottom(proxy, animated: false)
+            }
+            // Клавиатура открылась — поднимаем последние сообщения над ней.
+            .onChange(of: inputFocused) { focused in
+                guard focused else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    scrollToBottom(proxy, animated: true)
                 }
+            }
+        }
+    }
+
+    private static let bottomAnchorID = "chat-bottom-anchor"
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool) {
+        // Ждём один кадр: LazyVStack должен сначала разложить новые строки,
+        // иначе scrollTo промахивается (типичный «прыжок не до конца»).
+        DispatchQueue.main.async {
+            if animated {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+                }
+            } else {
+                proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
             }
         }
     }
@@ -962,6 +999,18 @@ private let stickerLinePrefix = "x5_sticker:"
 private struct FailedTextMessage {
     let outboundText: String
     let previewText: String
+}
+
+/// iOS 17+: лента сама стартует снизу (как в Telegram), без мигания сверху.
+/// На iOS 16 работает только scrollTo к якорю.
+private struct ChatBottomAnchorModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 17.0, *) {
+            content.defaultScrollAnchor(.bottom)
+        } else {
+            content
+        }
+    }
 }
 
 private enum ChatDeliveryState: Equatable {
