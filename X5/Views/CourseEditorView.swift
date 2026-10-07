@@ -88,6 +88,9 @@ struct CourseEditorView: View {
     @State private var deleteConfirm = false
     @State private var errorText: String?
     @State private var saveIdentity: CourseSaveIdentity
+    /// True once modules/lessons were written to the server by a checkpoint.
+    /// From then on "Cancel" must not delete the course draft.
+    @State private var structureCheckpointed = false
     @State private var saveStage: CourseSaveStage = .idle
 
     private var isCreating: Bool { saveIdentity.persistedCourseID == nil }
@@ -557,6 +560,15 @@ struct CourseEditorView: View {
             coverPreviewData = nil
         }
 
+        // Checkpoint: write modules and lessons BEFORE the slow video upload.
+        // Otherwise a failed or interrupted upload leaves the course with
+        // `categories = []` and the new module is lost.
+        saveStage = .savingCourse
+        guard await persistCourseStructure(courseId: id, accessToken: token) else {
+            markSaveFailed(service.error ?? "Не удалось сохранить модули курса.")
+            return
+        }
+
         guard await uploadPendingLessonVideos(courseId: id, accessToken: token) else {
             return
         }
@@ -571,20 +583,7 @@ struct CourseEditorView: View {
             return
         }
 
-        let priceInt = Int(price) ?? 0
-        let fields: [String: Any] = [
-            "title": title,
-            "description": description.x5Trimmed.isEmpty ? NSNull() : description,
-            "marketing_hook": marketingHook.x5Trimmed.isEmpty ? NSNull() : marketingHook,
-            "author_name": resolvedAuthorName,
-            "author_id": resolvedAuthorId,
-            "cover_url": coverUrl?.x5Trimmed.isEmpty == false ? (coverUrl ?? "") : NSNull(),
-            "price": priceInt,
-            "is_free": isFree,
-            "is_public": isPublic,
-            "course_language": courseLanguage,
-            "categories": categoriesPayload()
-        ]
+        let fields = courseFields(publishAsChosen: true)
         saveStage = .savingCourse
         let ok = await service.updateCourse(
             id: id,
@@ -599,6 +598,39 @@ struct CourseEditorView: View {
         onChange()
         try? await Task.sleep(nanoseconds: 350_000_000)
         dismiss()
+    }
+
+    private func courseFields(publishAsChosen: Bool) -> [String: Any] {
+        // Callers run only after the author was validated in save().
+        let resolvedAuthorId = self.resolvedAuthorId ?? ""
+        let priceInt = Int(price) ?? 0
+        return [
+            "title": title,
+            "description": description.x5Trimmed.isEmpty ? NSNull() : description,
+            "marketing_hook": marketingHook.x5Trimmed.isEmpty ? NSNull() : marketingHook,
+            "author_name": resolvedAuthorName,
+            "author_id": resolvedAuthorId,
+            "cover_url": coverUrl?.x5Trimmed.isEmpty == false ? (coverUrl ?? "") : NSNull(),
+            "price": priceInt,
+            "is_free": isFree,
+            // A brand-new course stays hidden until the final save succeeds.
+            "is_public": publishAsChosen ? isPublic : (isPublic && editing != nil),
+            "course_language": courseLanguage,
+            "categories": categoriesPayload()
+        ]
+    }
+
+    /// Intermediate save of the course structure (modules, lessons, media that
+    /// is already uploaded). Lessons whose video is still pending are saved
+    /// without a video URL and get it on a later checkpoint or the final save.
+    private func persistCourseStructure(courseId: String, accessToken: String) async -> Bool {
+        let ok = await service.updateCourse(
+            id: courseId,
+            fields: courseFields(publishAsChosen: false),
+            accessToken: accessToken
+        )
+        if ok { structureCheckpointed = true }
+        return ok
     }
 
     private func runDelete() async {
@@ -641,7 +673,10 @@ struct CourseEditorView: View {
                             await auth.accessTokenForUpload()
                         }
                     ) else {
-                        markSaveFailed(service.error ?? "Не удалось загрузить видео урока.")
+                        markSaveFailed(
+                            (service.error ?? "Не удалось загрузить видео урока.")
+                                + " Модули и уроки сохранены. Исправьте видео и нажмите «Сохранить» ещё раз."
+                        )
                         return false
                     }
 
@@ -649,6 +684,9 @@ struct CourseEditorView: View {
                     categories[categoryIndex].days[dayIndex].lessons[lessonIndex]
                         .markVideoUploadSucceeded(publicURL: publicURL)
                     uploaded += 1
+                    // Keep the uploaded URL on the server even if a later video fails.
+                    let checkpointToken = await auth.accessTokenForUpload() ?? accessToken
+                    _ = await persistCourseStructure(courseId: courseId, accessToken: checkpointToken)
                 }
             }
         }
@@ -727,6 +765,15 @@ struct CourseEditorView: View {
     private func cancelEditing() async {
         guard editing == nil, let id = existingId else {
             cleanupPendingLessonVideos()
+            dismiss()
+            return
+        }
+
+        // Modules were already saved by a checkpoint: keep the hidden draft
+        // instead of deleting the whole course together with them.
+        if structureCheckpointed {
+            cleanupPendingLessonVideos()
+            onChange()
             dismiss()
             return
         }

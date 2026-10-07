@@ -243,6 +243,43 @@ final class CourseDraftTests: XCTestCase {
         )
     }
 
+    /// Regression 2026-10-07: the editor writes the course structure BEFORE the slow
+    /// video upload. A new module whose lesson still has a pending video file must
+    /// therefore appear in the payload (without a video URL), not be dropped.
+    func testPayloadKeepsNewModuleWhoseLessonVideoIsStillPending() {
+        let pending = CourseLessonDraft(
+            id: "lesson-new",
+            title: "New lesson",
+            order: 1,
+            price: "0",
+            videoUrl: "",
+            youtubeUrl: "",
+            thumbnailUrl: "",
+            isFreePreview: false,
+            sellSeparately: false,
+            pendingVideoFileURL: URL(fileURLWithPath: "/tmp/new-lesson.mov"),
+            pendingVideoFileName: "new-lesson.mov"
+        )
+        let draft = CourseDraft(categories: [
+            CourseCategoryDraft(
+                id: "cat-new",
+                title: "New module",
+                order: 1,
+                days: [CourseDayDraft(id: "day-new", title: "Day 1", order: 1, lessons: [pending])]
+            )
+        ])
+
+        let payload = draft.categoriesPayload
+
+        XCTAssertEqual(payload.count, 1)
+        XCTAssertEqual(payload.first?["id"] as? String, "cat-new")
+        let days = payload.first?["days"] as? [[String: Any]]
+        let lessons = days?.first?["lessons"] as? [[String: Any]]
+        XCTAssertEqual(lessons?.count, 1)
+        XCTAssertEqual(lessons?.first?["id"] as? String, "lesson-new")
+        XCTAssertNil(lessons?.first?["videoUrl"])
+    }
+
     private func makeLesson(id: String, order: Int, videoURL: String?) -> CourseLesson {
         CourseLesson(
             id: id,
