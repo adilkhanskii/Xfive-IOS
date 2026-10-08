@@ -42,6 +42,16 @@ final class VoiceSliderCourseOrderTests: XCTestCase {
         XCTAssertEqual(positions.map(\.1), ["b", "a", "c"])
     }
 
+    /// 08.10 19:43: порядок курсов — только аккаунт Адильхана, второй разработчик — нет.
+    func testOnlyAdilkhanCanReorderCourses() {
+        XCTAssertTrue(Roles.canReorderCourses(userId: "eee55a08-18d1-46e3-a303-1411d1bb9333"))
+        XCTAssertTrue(Roles.canReorderCourses(userId: "EEE55A08-18D1-46E3-A303-1411D1BB9333"))
+        XCTAssertFalse(Roles.canReorderCourses(userId: "f3eea23f-0aeb-405b-ab35-2c53173b7a8f"))
+        XCTAssertTrue(Roles.isDeveloper(email: nil, userId: "f3eea23f-0aeb-405b-ab35-2c53173b7a8f"))
+        XCTAssertFalse(Roles.canReorderCourses(userId: nil))
+        XCTAssertFalse(Roles.canReorderCourses(userId: "00000000-0000-4000-8000-000000000001"))
+    }
+
     /// 08.10 вечер: перетаскивание карточек прямо в каталоге.
     func testDraggingCourseTakesPlaceOfCardUnderFinger() {
         let ids = ["a", "b", "c", "d"]

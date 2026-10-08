@@ -25,8 +25,11 @@ struct CoursesView: View {
     @State private var dragOrderSaveFailed = false
 
     private var isDev: Bool { Roles.isDeveloper(email: auth.userEmail, userId: auth.userId) }
-    /// Тянуть есть смысл только админу и только когда курсов больше одного.
-    private var canDragReorder: Bool { isDev && service.courses.count > 1 }
+    /// Порядок меняет только аккаунт Адильхана (08.10 19:43: «только у моего аккаунта»);
+    /// сервер это же проверяет триггером, так что скрытая кнопка — не единственная защита.
+    private var canReorderCourses: Bool { isDev && Roles.canReorderCourses(userId: auth.userId) }
+    /// Тянуть есть смысл только когда курсов больше одного.
+    private var canDragReorder: Bool { canReorderCourses && service.courses.count > 1 }
     private var featuredCourse: Course? { service.courses.first }
     private var academyCourses: [Course] { Array(service.courses.dropFirst()) }
 
@@ -176,14 +179,17 @@ struct CoursesView: View {
                         }
                     }
                     // Порядок курсов (Адильхан 08.10: «хаотично ставится»).
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button {
-                            showingCourseOrder = true
-                        } label: {
-                            Label("Порядок курсов", systemImage: "arrow.up.arrow.down")
+                    // Только его аккаунт: второму разработчику кнопка не нужна.
+                    if canReorderCourses {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button {
+                                showingCourseOrder = true
+                            } label: {
+                                Label("Порядок курсов", systemImage: "arrow.up.arrow.down")
+                            }
+                            .disabled(service.courses.count < 2)
+                            .accessibilityIdentifier("Course.catalog.reorder")
                         }
-                        .disabled(service.courses.count < 2)
-                        .accessibilityIdentifier("Course.catalog.reorder")
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
