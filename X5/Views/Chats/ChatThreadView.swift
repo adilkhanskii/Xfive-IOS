@@ -1868,7 +1868,8 @@ private struct PrivateChatAudioBubble: View {
             let newPlayer = AVPlayer(url: signedURL)
             // Новая ссылка (старая истекла) — продолжаем с того же места.
             if clock.currentTime > 0 {
-                newPlayer.seek(to: CMTime(seconds: clock.currentTime, preferredTimescale: 600))
+                // completionHandler — чтобы в async-функции не выбрался async-вариант seek.
+                newPlayer.seek(to: CMTime(seconds: clock.currentTime, preferredTimescale: 600)) { _ in }
             }
             player = newPlayer
             clock.attach(to: newPlayer)
