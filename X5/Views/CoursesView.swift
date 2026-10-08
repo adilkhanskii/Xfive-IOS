@@ -9,6 +9,7 @@ struct CoursesView: View {
     @State private var editorTarget: EditorTarget?
     @State private var showingCourseSubmission = false
     @State private var showingSubmissions = false
+    @State private var showingCourseOrder = false
 
     private var isDev: Bool { Roles.isDeveloper(email: auth.userEmail, userId: auth.userId) }
     private var featuredCourse: Course? { service.courses.first }
@@ -186,6 +187,16 @@ struct CoursesView: View {
                             Label("Заявки", systemImage: "tray.full")
                         }
                     }
+                    // Порядок курсов (Адильхан 08.10: «хаотично ставится»).
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            showingCourseOrder = true
+                        } label: {
+                            Label("Порядок курсов", systemImage: "arrow.up.arrow.down")
+                        }
+                        .disabled(service.courses.count < 2)
+                        .accessibilityIdentifier("Course.catalog.reorder")
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             editorTarget = .create
@@ -221,6 +232,15 @@ struct CoursesView: View {
             .sheet(isPresented: $showingSubmissions) {
                 CourseSubmissionsAdminView()
             }
+            .sheet(isPresented: $showingCourseOrder) {
+                CourseOrderSheet(courses: service.courses) { ids in
+                    guard let token = await auth.freshAccessToken() else { return false }
+                    let saved = await service.saveCourseOrder(ids: ids, accessToken: token)
+                    // Перечитать с сервера: экран показывает то, что реально в базе.
+                    await reloadCourses()
+                    return saved
+                }
+            }
             .sheet(item: $editorTarget) { target in
                 switch target {
                 case .create:
@@ -242,6 +262,100 @@ struct CoursesView: View {
         await service.loadCourses(includeHidden: isDev, accessToken: accessToken)
     }
 
+}
+
+/// Админ меняет порядок курсов: тянуть за ≡ справа, «Сохранить» пишет sort_order 0, 1, 2…
+/// Первый в списке = большая карточка сверху каталога.
+// идея: если курсов станет много — фильтр «только опубликованные».
+private struct CourseOrderSheet: View {
+    let onSave: ([String]) async -> Bool
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var items: [Course]
+    @State private var isSaving = false
+    @State private var saveFailed = false
+
+    init(courses: [Course], onSave: @escaping ([String]) async -> Bool) {
+        self.onSave = onSave
+        _items = State(initialValue: courses)
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, course in
+                        HStack(spacing: 12) {
+                            Text("\(index + 1)")
+                                .font(.system(size: 15, weight: .bold).monospacedDigit())
+                                .foregroundColor(.secondary)
+                                .frame(width: 22)
+                            ZStack {
+                                Color.white.opacity(0.08)
+                                if let cover = course.coverUrl, !cover.isEmpty, let url = URL(string: cover) {
+                                    CachedAsyncImage(url: url) { image in
+                                        image.resizable().scaledToFill()
+                                    } placeholder: {
+                                        Image(systemName: "graduationcap").foregroundColor(.secondary)
+                                    }
+                                } else {
+                                    Image(systemName: "graduationcap").foregroundColor(.secondary)
+                                }
+                            }
+                            .frame(width: 56, height: 36)
+                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(course.title)
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .lineLimit(2)
+                                if course.isPublic == false {
+                                    Text("Черновик")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                        .accessibilityIdentifier("Course.order.item.\(course.id)")
+                    }
+                    .onMove { from, to in
+                        items.move(fromOffsets: from, toOffset: to)
+                    }
+                } footer: {
+                    Text(saveFailed
+                         ? "Не сохранилось. Проверьте интернет и нажмите «Сохранить» ещё раз."
+                         : "Потяните курс за ≡ справа. Первый — большая карточка сверху.")
+                        .foregroundColor(saveFailed ? .red : .secondary)
+                }
+            }
+            .environment(\.editMode, .constant(.active))
+            .navigationTitle("Порядок курсов")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Отмена") { dismiss() }
+                        .disabled(isSaving)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if isSaving {
+                        ProgressView()
+                    } else {
+                        Button("Сохранить") {
+                            Task {
+                                isSaving = true
+                                saveFailed = false
+                                let ok = await onSave(items.map(\.id))
+                                isSaving = false
+                                if ok { dismiss() } else { saveFailed = true }
+                            }
+                        }
+                        .bold()
+                        .accessibilityIdentifier("Course.order.save")
+                    }
+                }
+            }
+        }
+        .interactiveDismissDisabled(isSaving)
+    }
 }
 
 private struct CourseAuthorLine: View {

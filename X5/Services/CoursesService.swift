@@ -354,7 +354,22 @@ enum CourseListRequestError: LocalizedError, Equatable {
     }
 }
 
+enum CourseOrder {
+    /// Пары (позиция, id) по порядку, повторы id выкинуты.
+    static func positions(for ids: [String]) -> [(Int, String)] {
+        var seen = Set<String>()
+        var result: [(Int, String)] = []
+        for id in ids where seen.insert(id).inserted {
+            result.append((result.count, id))
+        }
+        return result
+    }
+}
+
 enum CourseListRequestBuilder {
+    /// Один порядок для каталога: sort_order, при равных — дата создания, потом id.
+    static let order = "sort_order.asc.nullslast,created_at.asc,id.asc"
+
     static func makeRequest(
         baseURL: URL,
         anonKey: String,
@@ -368,7 +383,9 @@ enum CourseListRequestBuilder {
         )!
         var items: [URLQueryItem] = [
             URLQueryItem(name: "select", value: select),
-            URLQueryItem(name: "order", value: "sort_order.asc")
+            // При равном sort_order база отдаёт строки в случайном порядке —
+            // отсюда «хаотично» у Адильхана (08.10). Старые раньше, новые в конец.
+            URLQueryItem(name: "order", value: Self.order)
         ]
         if !includeHidden {
             items.append(URLQueryItem(name: "is_public", value: "eq.true"))
@@ -575,6 +592,10 @@ final class CoursesService: ObservableObject {
         if let authorId, UUID(uuidString: authorId) != nil {
             body["author_id"] = authorId
         }
+        // Новый курс — в конец списка (не 0, как раньше: иначе встаёт куда попало).
+        if let next = await nextSortOrder(accessToken: accessToken) {
+            body["sort_order"] = next
+        }
 
         do {
             post.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -639,6 +660,42 @@ final class CoursesService: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let suffix = compact.isEmpty ? "" : ": \(String(compact.prefix(240)))"
         return "\(prefix) (\(status))\(suffix)"
+    }
+
+    /// Максимальный sort_order + 1 (по всем курсам, видимым разработчику). nil — не узнали.
+    private func nextSortOrder(accessToken: String) async -> Int? {
+        var c = URLComponents(url: baseURL.appendingPathComponent("rest/v1/courses"), resolvingAgainstBaseURL: false)!
+        c.queryItems = [
+            URLQueryItem(name: "select", value: "sort_order"),
+            URLQueryItem(name: "order", value: "sort_order.desc.nullslast"),
+            URLQueryItem(name: "limit", value: "1")
+        ]
+        var request = URLRequest(url: c.url!)
+        request.setValue(anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else { return nil }
+        guard let top = rows.first?["sort_order"] as? Int else { return 0 }
+        return top + 1
+    }
+
+    /// Админ поменял порядок: пишем sort_order = 0, 1, 2… по ВСЕМ курсам.
+    /// Обмен двух значений не годится: у всех курсов в базе было 0 (08.10).
+    func saveCourseOrder(ids: [String], accessToken: String) async -> Bool {
+        let ordered = CourseOrder.positions(for: ids)
+        for (index, id) in ordered {
+            guard await updateCourse(id: id, fields: ["sort_order": index], accessToken: accessToken) else {
+                return false
+            }
+        }
+        if !courses.isEmpty {
+            let position = Dictionary(uniqueKeysWithValues: ordered.map { ($0.1, $0.0) })
+            courses.sort { (position[$0.id] ?? Int.max) < (position[$1.id] ?? Int.max) }
+        }
+        return true
     }
 
     func deleteCourse(id: String, accessToken: String) async -> Bool {

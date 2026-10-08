@@ -1646,6 +1646,74 @@ private struct PrivateChatVideoBubble: View {
     }
 }
 
+// Голосовое в чате: ▶/⏸ + ползунок (тянуть пальцем = перемотка) + «0:12 / 0:40».
+// Просьба Адильхана 08.10 «надо ползунок сделать», как в WhatsApp/Telegram.
+// Одновременно играет одно голосовое; после конца — снова ▶ и ползунок в начале.
+extension Notification.Name {
+    /// object = id сообщения, которое начало играть; остальные голосовые встают на паузу.
+    static let x5VoiceMessageDidStart = Notification.Name("x5VoiceMessageDidStart")
+}
+
+enum VoiceMessageTime {
+    /// «0:07», «1:05». NaN/∞/минус → «0:00».
+    static func format(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds > 0 else { return "0:00" }
+        let total = Int(seconds)
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
+
+    /// Длительность из текста сообщения: сайт пишет «12s», здесь бывает «0:12».
+    /// Нужна, пока файл не загрузился (или если webm с сайта не читается).
+    static func parse(_ content: String?) -> Double {
+        let text = (content ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if text.hasSuffix("s"), let value = Double(text.dropLast()) { return max(0, value) }
+        let parts = text.split(separator: ":")
+        if parts.count == 2, let m = Double(parts[0]), let s = Double(parts[1]) { return m * 60 + s }
+        return 0
+    }
+}
+
+/// Часы плеера: следит за временем AVPlayer 10 раз в секунду.
+private final class VoicePlaybackClock: ObservableObject {
+    @Published var currentTime: Double = 0
+    @Published var duration: Double = 0
+    var isScrubbing = false
+
+    private weak var observedPlayer: AVPlayer?
+    private var observer: Any?
+
+    func attach(to player: AVPlayer) {
+        guard observedPlayer !== player else { return }
+        detach()
+        observedPlayer = player
+        observer = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.1, preferredTimescale: 600),
+            queue: .main
+        ) { [weak self] time in
+            guard let self, !self.isScrubbing, time.seconds.isFinite else { return }
+            self.currentTime = time.seconds
+        }
+        Task { @MainActor in await self.loadDuration(of: player) }
+    }
+
+    func detach() {
+        if let observer, let observedPlayer {
+            observedPlayer.removeTimeObserver(observer)
+        }
+        observer = nil
+        observedPlayer = nil
+    }
+
+    @MainActor
+    private func loadDuration(of player: AVPlayer) async {
+        guard let asset = player.currentItem?.asset,
+              let value = try? await asset.load(.duration),
+              value.isNumeric, value.seconds.isFinite, value.seconds > 0
+        else { return }
+        duration = value.seconds
+    }
+}
+
 private struct PrivateChatAudioBubble: View {
     let message: ChatMessageRow
     let chatID: String
@@ -1653,11 +1721,18 @@ private struct PrivateChatAudioBubble: View {
 
     @EnvironmentObject private var loc: LocalizationService
     @EnvironmentObject private var auth: Auth
+    @StateObject private var clock = VoicePlaybackClock()
     @State private var player: AVPlayer?
     @State private var isPlaying = false
     @State private var isLoading = false
     @State private var failed = false
     @State private var retriedExpiredURL = false
+    @State private var wasPlayingBeforeScrub = false
+
+    /// Длина из файла, а пока её нет — из текста сообщения.
+    private var duration: Double {
+        clock.duration > 0 ? clock.duration : VoiceMessageTime.parse(message.content)
+    }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -1670,19 +1745,53 @@ private struct PrivateChatAudioBubble: View {
             }
             .buttonStyle(.plain)
             .disabled(isLoading)
-            Text(loc.t("chat_voice_message"))
-                .font(.system(size: 13))
-                .foregroundColor(.white.opacity(0.85))
-            if failed {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.65))
+            .accessibilityLabel(isPlaying ? "Пауза" : loc.t("chat_voice_message"))
+
+            VStack(alignment: .leading, spacing: 0) {
+                Slider(
+                    value: Binding(
+                        get: { min(clock.currentTime, max(duration, 0.01)) },
+                        set: { newValue in
+                            clock.currentTime = newValue
+                            seek(to: newValue)
+                        }
+                    ),
+                    in: 0...max(duration, 0.01),
+                    onEditingChanged: scrubbingChanged
+                )
+                .tint(.white)
+                // Пока длина неизвестна, тянуть нечего.
+                .disabled(duration <= 0 || isLoading)
+                .accessibilityLabel("Перемотка голосового")
+                .accessibilityValue("\(VoiceMessageTime.format(clock.currentTime)) из \(VoiceMessageTime.format(duration))")
+
+                HStack(spacing: 6) {
+                    Text("\(VoiceMessageTime.format(clock.currentTime)) / \(VoiceMessageTime.format(duration))")
+                        .font(.system(size: 11, weight: .medium).monospacedDigit())
+                        .foregroundColor(.white.opacity(0.75))
+                    if failed {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.65))
+                    }
+                }
             }
+            .frame(width: 170)
+        }
+        .task(id: message.id) {
+            // Как в WhatsApp: длина видна до нажатия ▶. Ссылка кешируется в сервисе.
+            await preparePlayer(forceRefresh: false)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .x5VoiceMessageDidStart)) { note in
+            guard let startedID = note.object as? String, startedID != message.id, isPlaying else { return }
+            player?.pause()
+            isPlaying = false
         }
         .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { note in
             guard let item = note.object as? AVPlayerItem, item === player?.currentItem else { return }
             isPlaying = false
             player?.seek(to: .zero)
+            clock.currentTime = 0
         }
         .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime)) { note in
             guard let item = note.object as? AVPlayerItem, item === player?.currentItem else { return }
@@ -1694,9 +1803,30 @@ private struct PrivateChatAudioBubble: View {
         }
         .onDisappear {
             player?.pause()
+            clock.detach()
             player = nil
             isPlaying = false
         }
+    }
+
+    private func scrubbingChanged(_ editing: Bool) {
+        if editing {
+            clock.isScrubbing = true
+            wasPlayingBeforeScrub = isPlaying
+            player?.pause()
+        } else {
+            seek(to: clock.currentTime)
+            clock.isScrubbing = false
+            if wasPlayingBeforeScrub {
+                player?.play()
+            }
+        }
+    }
+
+    private func seek(to seconds: Double) {
+        guard let player else { return }
+        let target = CMTime(seconds: max(0, seconds), preferredTimescale: 600)
+        player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
     }
 
     private func togglePlay() async {
@@ -1708,15 +1838,15 @@ private struct PrivateChatAudioBubble: View {
         }
     }
 
-    private func startPlayback(forceRefresh: Bool) async {
+    /// Достаёт подписанную ссылку и создаёт плеер (без звука). true — плеер готов.
+    @discardableResult
+    private func preparePlayer(forceRefresh: Bool) async -> Bool {
         guard let canonicalURL = message.mediaUrl,
               let currentUserID = auth.userId,
               let token = await auth.freshAccessToken()
         else {
-            failed = true
-            return
+            return false
         }
-        isLoading = true
         if forceRefresh {
             service.invalidateSignedMedia(
                 canonicalURL: canonicalURL,
@@ -1731,6 +1861,24 @@ private struct PrivateChatAudioBubble: View {
             accessToken: token,
             forceRefresh: forceRefresh
         ) else {
+            return false
+        }
+        let currentURL = (player?.currentItem?.asset as? AVURLAsset)?.url
+        if player == nil || currentURL != signedURL {
+            let newPlayer = AVPlayer(url: signedURL)
+            // Новая ссылка (старая истекла) — продолжаем с того же места.
+            if clock.currentTime > 0 {
+                newPlayer.seek(to: CMTime(seconds: clock.currentTime, preferredTimescale: 600))
+            }
+            player = newPlayer
+            clock.attach(to: newPlayer)
+        }
+        return true
+    }
+
+    private func startPlayback(forceRefresh: Bool) async {
+        isLoading = true
+        guard await preparePlayer(forceRefresh: forceRefresh) else {
             isLoading = false
             failed = true
             return
@@ -1738,10 +1886,7 @@ private struct PrivateChatAudioBubble: View {
 
         try? AVAudioSession.sharedInstance().setCategory(.playback)
         try? AVAudioSession.sharedInstance().setActive(true)
-        let currentURL = (player?.currentItem?.asset as? AVURLAsset)?.url
-        if player == nil || currentURL != signedURL {
-            player = AVPlayer(url: signedURL)
-        }
+        NotificationCenter.default.post(name: .x5VoiceMessageDidStart, object: message.id)
         player?.play()
         isPlaying = true
         isLoading = false
