@@ -364,6 +364,19 @@ enum CourseOrder {
         }
         return result
     }
+
+    /// Перетаскивание в каталоге (Адильхан 08.10, видео «удержать и двигать»):
+    /// палец с курсом `id` зашёл на карточку `targetId` → курс встаёт на её место,
+    /// остальные сдвигаются на одну позицию. Тянем вниз — встаёт после цели, вверх — перед ней.
+    static func moving(_ ids: [String], id: String, over targetId: String) -> [String] {
+        guard id != targetId,
+              let from = ids.firstIndex(of: id),
+              let to = ids.firstIndex(of: targetId) else { return ids }
+        var result = ids
+        result.remove(at: from)
+        result.insert(id, at: to)
+        return result
+    }
 }
 
 enum CourseListRequestBuilder {
@@ -684,17 +697,32 @@ final class CoursesService: ObservableObject {
 
     /// Админ поменял порядок: пишем sort_order = 0, 1, 2… по ВСЕМ курсам.
     /// Обмен двух значений не годится: у всех курсов в базе было 0 (08.10).
-    func saveCourseOrder(ids: [String], accessToken: String) async -> Bool {
+    /// `applyLocally: false` — для перетаскивания в каталоге: пока идёт запись, админ
+    /// мог сдвинуть карточку ещё раз, и пересортировка вернула бы старый порядок.
+    func saveCourseOrder(ids: [String], accessToken: String, applyLocally: Bool = true) async -> Bool {
         let ordered = CourseOrder.positions(for: ids)
         for (index, id) in ordered {
             guard await updateCourse(id: id, fields: ["sort_order": index], accessToken: accessToken) else {
                 return false
             }
         }
-        if !courses.isEmpty {
+        if applyLocally, !courses.isEmpty {
             let position = Dictionary(uniqueKeysWithValues: ordered.map { ($0.1, $0.0) })
             courses.sort { (position[$0.id] ?? Int.max) < (position[$1.id] ?? Int.max) }
         }
+        return true
+    }
+
+    /// Сдвиг только на экране, без записи в базу: во время перетаскивания карточки
+    /// меняются местами сразу, а в базу пишем, когда палец отпустили.
+    /// false — порядок не изменился.
+    @discardableResult
+    func moveCourseLocally(id: String, over targetId: String) -> Bool {
+        let current = courses.map(\.id)
+        let moved = CourseOrder.moving(current, id: id, over: targetId)
+        guard moved != current else { return false }
+        let position = Dictionary(uniqueKeysWithValues: moved.enumerated().map { ($0.element, $0.offset) })
+        courses.sort { (position[$0.id] ?? Int.max) < (position[$1.id] ?? Int.max) }
         return true
     }
 

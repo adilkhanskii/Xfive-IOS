@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import UniformTypeIdentifiers
 
 struct CoursesView: View {
     @EnvironmentObject private var auth: Auth
@@ -11,7 +12,21 @@ struct CoursesView: View {
     @State private var showingSubmissions = false
     @State private var showingCourseOrder = false
 
+    // Перетаскивание карточек прямо в каталоге (Адильхан 08.10: «удержать и двигать вверх-вниз»).
+    /// Какой курс сейчас тянут — для логики сдвига. Сбрасывается, когда палец отпустили.
+    @State private var draggingCourseId: String?
+    /// Какая карточка полупрозрачная («место, куда встанет»). Отдельно от draggingCourseId:
+    /// если перетаскивание отменили (отпустили над таб-баром), drop не приходит —
+    /// прозрачность снимаем по таймеру, а логику не ломаем.
+    @State private var ghostCourseId: String?
+    @State private var orderDirty = false
+    @State private var isSavingDraggedOrder = false
+    @State private var dragSaveTask: Task<Void, Never>?
+    @State private var dragOrderSaveFailed = false
+
     private var isDev: Bool { Roles.isDeveloper(email: auth.userEmail, userId: auth.userId) }
+    /// Тянуть есть смысл только админу и только когда курсов больше одного.
+    private var canDragReorder: Bool { isDev && service.courses.count > 1 }
     private var featuredCourse: Course? { service.courses.first }
     private var academyCourses: [Course] { Array(service.courses.dropFirst()) }
 
@@ -79,24 +94,11 @@ struct CoursesView: View {
                                             .accessibilityIdentifier("Course.catalog.item.\(course.id)")
                                     }
                                     .buttonStyle(.plain)
-                                    .contextMenu {
-                                        if isDev {
-                                            Button {
-                                                editorTarget = .edit(course)
-                                            } label: {
-                                                Label("Редактировать", systemImage: "pencil")
-                                            }
-                                            Button(role: .destructive) {
-                                                Task {
-                                                    guard let token = auth.accessToken else { return }
-                                                    _ = await service.deleteCourse(id: course.id, accessToken: token)
-                                                    await reloadCourses()
-                                                }
-                                            } label: {
-                                                Label("Удалить", systemImage: "trash")
-                                            }
-                                        }
-                                    }
+                                    // Меню по долгому нажатию (Редактировать/Удалить) убрано 08.10:
+                                    // долгое нажатие теперь = перетаскивание. Меню и drag на одном
+                                    // жесте конфликтуют, а проверить на iPhone без Мака нельзя.
+                                    // Редактировать — карандаш, удалить — в редакторе (с подтверждением,
+                                    // а меню удаляло сразу, без вопроса).
 
                                     // Visible edit button for developers (overlay top-left)
                                     if isDev {
@@ -115,6 +117,7 @@ struct CoursesView: View {
                                         .padding(12)
                                     }
                                 }
+                                .modifier(dragReorder(for: course))
                             }
 
                             ForEach(Array(academyCourses.enumerated()), id: \.element.id) { index, course in
@@ -144,26 +147,11 @@ struct CoursesView: View {
                                         .accessibilityLabel("Редактировать курс")
                                     }
                                 }
-                                .contextMenu {
-                                    if isDev {
-                                        Button {
-                                            editorTarget = .edit(course)
-                                        } label: {
-                                            Label("Редактировать", systemImage: "pencil")
-                                        }
-                                        Button(role: .destructive) {
-                                            Task {
-                                                guard let token = await auth.freshAccessToken() else { return }
-                                                _ = await service.deleteCourse(id: course.id, accessToken: token)
-                                                await reloadCourses()
-                                            }
-                                        } label: {
-                                            Label("Удалить", systemImage: "trash")
-                                        }
-                                    }
-                                }
+                                .modifier(dragReorder(for: course))
                             }
                         }
+                        // Отпустили палец в промежутке между карточками — тоже «готово».
+                        .modifier(CourseDragContainer(enabled: canDragReorder) { finishCourseDrag() })
                         .padding(.horizontal, 16)
                         .padding(.top, 2)
                         .padding(.bottom, 32)
@@ -254,6 +242,11 @@ struct CoursesView: View {
                 }
             }
             .task { await reloadCourses() }
+            .alert("Порядок не сохранился", isPresented: $dragOrderSaveFailed) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Проверьте интернет и перетащите курс ещё раз.")
+            }
         }
     }
 
@@ -262,6 +255,166 @@ struct CoursesView: View {
         await service.loadCourses(includeHidden: isDev, accessToken: accessToken)
     }
 
+    // MARK: - Перетаскивание карточек (только админ)
+
+    private func dragReorder(for course: Course) -> CourseDragReorder {
+        CourseDragReorder(
+            enabled: canDragReorder,
+            courseId: course.id,
+            isGhost: ghostCourseId == course.id,
+            draggingCourseId: $draggingCourseId,
+            onLift: { liftCourse(course.id) },
+            onEnter: { draggedId in moveDraggedCourse(draggedId, over: course.id) },
+            onDrop: { finishCourseDrag() }
+        )
+    }
+
+    private func liftCourse(_ id: String) {
+        // Лёгкая вибрация при захвате — как у иконок на главном экране iPhone.
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        draggingCourseId = id
+        withAnimation(.easeOut(duration: 0.15)) { ghostCourseId = id }
+        scheduleDraggedOrderSave(after: 4)
+    }
+
+    private func moveDraggedCourse(_ id: String, over targetId: String) {
+        // Пружина — соседние карточки плавно уезжают, а не прыгают.
+        let moved = withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+            service.moveCourseLocally(id: id, over: targetId)
+        }
+        guard moved else { return }
+        UISelectionFeedbackGenerator().selectionChanged()
+        orderDirty = true
+        // Запасное сохранение: если drop не придёт (отпустили над таб-баром),
+        // порядок на экране уже новый — через пару секунд тишины пишем его в базу.
+        scheduleDraggedOrderSave(after: 2.5)
+    }
+
+    private func finishCourseDrag() {
+        draggingCourseId = nil
+        withAnimation(.easeOut(duration: 0.2)) { ghostCourseId = nil }
+        scheduleDraggedOrderSave(after: 0)
+    }
+
+    private func scheduleDraggedOrderSave(after seconds: Double) {
+        dragSaveTask?.cancel()
+        dragSaveTask = Task { @MainActor in
+            if seconds > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                // Давно не было движений — снимаем полупрозрачность (перетаскивание,
+                // скорее всего, отменили). draggingCourseId не трогаем: если палец
+                // всё ещё держит карточку, сдвиг продолжит работать.
+                withAnimation(.easeOut(duration: 0.2)) { ghostCourseId = nil }
+            }
+            await saveDraggedOrderIfNeeded()
+        }
+    }
+
+    /// Пишет sort_order = 0, 1, 2… по текущему порядку на экране. Записи идут строго
+    /// по одной: если админ сдвинул ещё раз во время записи, цикл запишет и это.
+    private func saveDraggedOrderIfNeeded() async {
+        guard orderDirty, !isSavingDraggedOrder else { return }
+        isSavingDraggedOrder = true
+        defer { isSavingDraggedOrder = false }
+        while orderDirty {
+            orderDirty = false
+            let ids = service.courses.map(\.id)
+            var saved = false
+            if let token = await auth.freshAccessToken() {
+                saved = await service.saveCourseOrder(ids: ids, accessToken: token, applyLocally: false)
+            }
+            if !saved {
+                dragOrderSaveFailed = true
+                // Показать порядок, который реально лежит в базе.
+                await reloadCourses()
+                return
+            }
+        }
+    }
+
+}
+
+/// Долгое нажатие на карточку → карточка «поднимается», её можно тянуть вверх-вниз;
+/// соседние сдвигаются сразу, пока палец над ними. Сделано на системном drag & drop
+/// (onDrag/onDrop), а не на своём жесте: свой LongPress+Drag внутри ScrollView
+/// ломает прокрутку и нажатие на карточку, а системный с ними дружит.
+// идея: если курсов станет много — автопрокрутка у края экрана во время перетаскивания.
+private struct CourseDragReorder: ViewModifier {
+    let enabled: Bool
+    let courseId: String
+    let isGhost: Bool
+    // Binding, а не значение: делегат должен видеть свежий id, пока палец держит карточку.
+    let draggingCourseId: Binding<String?>
+    let onLift: () -> Void
+    let onEnter: (String) -> Void
+    let onDrop: () -> Void
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                // Полупрозрачная карточка на месте = «сюда встанет».
+                .opacity(isGhost ? 0.35 : 1)
+                .scaleEffect(isGhost ? 0.97 : 1)
+                .onDrag {
+                    onLift()
+                    return NSItemProvider(object: courseId as NSString)
+                }
+                .onDrop(
+                    of: [UTType.plainText],
+                    delegate: CourseCardDropDelegate(
+                        targetId: courseId,
+                        draggingCourseId: draggingCourseId,
+                        onEnter: onEnter,
+                        onDrop: onDrop
+                    )
+                )
+        } else {
+            // Обычный пользователь: каталог как был, без жестов.
+            content
+        }
+    }
+}
+
+private struct CourseCardDropDelegate: DropDelegate {
+    let targetId: String
+    // Binding, а не значение: делегат должен видеть свежий id, пока палец держит карточку.
+    let draggingCourseId: Binding<String?>
+    let onEnter: (String) -> Void
+    let onDrop: () -> Void
+
+    // Принимаем только свои карточки (не текст, перетащенный из другого приложения).
+    func validateDrop(info: DropInfo) -> Bool { draggingCourseId.wrappedValue != nil }
+
+    func dropEntered(info: DropInfo) {
+        guard let dragged = draggingCourseId.wrappedValue, dragged != targetId else { return }
+        onEnter(dragged)
+    }
+
+    // .move — без зелёного «+» у карточки под пальцем.
+    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
+
+    func performDrop(info: DropInfo) -> Bool {
+        onDrop()
+        return true
+    }
+}
+
+/// Приёмник на весь каталог: палец отпустили между карточками — сохраняем так же.
+private struct CourseDragContainer: ViewModifier {
+    let enabled: Bool
+    let onDrop: () -> Void
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.onDrop(of: [UTType.plainText], isTargeted: nil) { _ in
+                onDrop()
+                return true
+            }
+        } else {
+            content
+        }
+    }
 }
 
 /// Админ меняет порядок курсов: тянуть за ≡ справа, «Сохранить» пишет sort_order 0, 1, 2…

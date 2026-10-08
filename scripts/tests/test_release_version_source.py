@@ -56,9 +56,10 @@ class ReleaseVersionSourceTests(unittest.TestCase):
         # 07.10.2026: тестовые TestFlight-сборки ушли вперёд (245 — фикс модуля
         # курса + чат + город в профиле; 246 — то же + Bunny Stream для видео
         # уроков, одна общая сборка; 247 — фикс двойной галереи обложки урока;
-        # 08.10: 248 — ползунок голосовых + порядок курсов);
+        # 08.10: 248 — ползунок голосовых + порядок курсов; 249 — то же +
+        # перетаскивание карточек курсов в каталоге);
         # цель ревью App Store ниже остаётся 243.
-        self.assertEqual(runtime_build_number, "248")
+        self.assertEqual(runtime_build_number, "249")
         self.assertEqual(fastlane_version, marketing_version)
         self.assertIn(
             f"Version {marketing_version} build 243",

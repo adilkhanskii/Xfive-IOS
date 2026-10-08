@@ -41,4 +41,19 @@ final class VoiceSliderCourseOrderTests: XCTestCase {
         XCTAssertEqual(positions.map(\.0), [0, 1, 2])
         XCTAssertEqual(positions.map(\.1), ["b", "a", "c"])
     }
+
+    /// 08.10 вечер: перетаскивание карточек прямо в каталоге.
+    func testDraggingCourseTakesPlaceOfCardUnderFinger() {
+        let ids = ["a", "b", "c", "d"]
+        // Вниз: «a» над «c» → встаёт на место «c», b и c сдвигаются вверх.
+        XCTAssertEqual(CourseOrder.moving(ids, id: "a", over: "c"), ["b", "c", "a", "d"])
+        // Вверх: «d» над «b» → встаёт на место «b», b и c сдвигаются вниз.
+        XCTAssertEqual(CourseOrder.moving(ids, id: "d", over: "b"), ["a", "d", "b", "c"])
+        // Наверх, в большую карточку.
+        XCTAssertEqual(CourseOrder.moving(ids, id: "c", over: "a"), ["c", "a", "b", "d"])
+        // Над собой или неизвестный id — порядок не меняется.
+        XCTAssertEqual(CourseOrder.moving(ids, id: "b", over: "b"), ids)
+        XCTAssertEqual(CourseOrder.moving(ids, id: "x", over: "b"), ids)
+        XCTAssertEqual(CourseOrder.moving(ids, id: "b", over: "x"), ids)
+    }
 }
