@@ -36,3 +36,8 @@ verify_jwt = false
 # No-rebuild Bunny mirror (pg_cron / operator with X-X5-Reconcile-Secret).
 [functions.course-video-bunny-mirror]
 verify_jwt = false
+
+# Защищённый перенос старых уроков в Bunny (только оператор,
+# X-X5-Reconcile-Secret; проверка в handler).
+[functions.course-video-legacy-import]
+verify_jwt = false
