@@ -11,18 +11,15 @@ import Foundation
 /// doesn't inherit the previous user's hidden messages.
 enum MessagesLocalState {
     private static let hiddenKey = "x5.messages.hidden_ids"
+    // Старый локальный закреп (до 09.10). Теперь закреп на сервере — chats.pinned_message_id;
+    // ключ остался только чтобы reset() чистил хвосты у старых установок.
     private static let pinnedKey = "x5.messages.pinned_ids"
 
     static var hidden: Set<String> {
         Set(UserDefaults.standard.stringArray(forKey: hiddenKey) ?? [])
     }
 
-    static var pinned: Set<String> {
-        Set(UserDefaults.standard.stringArray(forKey: pinnedKey) ?? [])
-    }
-
     static func isHidden(_ id: String) -> Bool { hidden.contains(id) }
-    static func isPinned(_ id: String) -> Bool { pinned.contains(id) }
 
     static func hide(_ id: String) {
         var current = hidden
@@ -34,18 +31,6 @@ enum MessagesLocalState {
         var current = hidden
         current.remove(id)
         UserDefaults.standard.set(Array(current), forKey: hiddenKey)
-    }
-
-    static func pin(_ id: String) {
-        var current = pinned
-        current.insert(id)
-        UserDefaults.standard.set(Array(current), forKey: pinnedKey)
-    }
-
-    static func unpin(_ id: String) {
-        var current = pinned
-        current.remove(id)
-        UserDefaults.standard.set(Array(current), forKey: pinnedKey)
     }
 
     /// Called from Auth.signOut — keeps cross-account isolation.

@@ -43,6 +43,17 @@ struct ChatThreadView: View {
     @State private var chatStateTick: Int = 0
     /// Первая прокрутка вниз — без анимации (чат сразу открывается на последнем сообщении).
     @State private var didInitialScroll: Bool = false
+    /// Закреп с сервера (chats.pinned_message_id) — один на чат, общий для обоих, как в Telegram.
+    @State private var pinnedMessageID: String?
+    /// Закреплённое сообщение, если оно старше загруженной страницы (для превью в плашке).
+    @State private var pinnedMessageFallback: ChatMessageRow?
+    @State private var pinError: String?
+    /// Тап по плашке → прокрутка к сообщению и короткая подсветка.
+    @State private var scrollTargetID: String?
+    @State private var highlightedMessageID: String?
+    @State private var pollTick: Int = 0
+    /// Пока наш запрос «закрепить» в пути, опрос сервера не перетирает экран старым значением.
+    @State private var pinWriteInFlight: Bool = false
 
     init(chat: ChatRoom, initialOther: UserProfile? = nil) {
         self.chat = chat
@@ -74,6 +85,8 @@ struct ChatThreadView: View {
                 .padding(.horizontal, 14).padding(.vertical, 8)
                 .background(Color.white.opacity(0.06))
             }
+
+            pinnedBanner
 
             messagesPane
 
@@ -193,6 +206,14 @@ struct ChatThreadView: View {
         } message: {
             Text(attachmentError ?? "")
         }
+        .alert("Не получилось", isPresented: Binding(
+            get: { pinError != nil },
+            set: { if !$0 { pinError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(pinError ?? "")
+        }
         .sheet(isPresented: $showingStickers) {
             StickerTray { sticker in
                 showingStickers = false
@@ -211,12 +232,16 @@ struct ChatThreadView: View {
                 messages = cached
             }
             await reload()
+            await refreshPin()
             await markThreadRead()
             await loadOther()
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
                 guard !Task.isCancelled else { break }
                 await pollNewMessages()
+                // Закреп собеседника подтягиваем раз в ~12 с — чаще не нужно, это лишний запрос.
+                pollTick &+= 1
+                if pollTick % 4 == 0 { await refreshPin() }
             }
         }
     }
@@ -278,6 +303,16 @@ struct ChatThreadView: View {
             .onAppear {
                 scrollToBottom(proxy, animated: false)
             }
+            // Тап по плашке закрепа: прокрутка к сообщению по центру экрана.
+            .onChange(of: scrollTargetID) { target in
+                guard let target else { return }
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        proxy.scrollTo(target, anchor: .center)
+                    }
+                    scrollTargetID = nil
+                }
+            }
             // Клавиатура открылась — поднимаем последние сообщения над ней.
             .onChange(of: inputFocused) { focused in
                 guard focused else { return }
@@ -315,11 +350,11 @@ struct ChatThreadView: View {
             service: service,
             isMine: message.senderId == auth.userId,
             isRead: isReadByPeer(message),
-            isPinned: MessagesLocalState.isPinned(message.id),
+            isPinned: message.id == pinnedMessageID,
+            isHighlighted: message.id == highlightedMessageID,
             deliveryState: deliveryState(for: message),
             onReply: { replyingTo = message },
             onTogglePin: { toggleMessagePin(message) },
-            onAskStartupChat: { askStartupChat(about: message) },
             onRetry: { retry(messageID: message.id) },
             onDeleteForMe: {
                 MessagesLocalState.hide(message.id)
@@ -343,21 +378,12 @@ struct ChatThreadView: View {
     }
 
     private func replyBanner(for message: ChatMessageRow) -> some View {
+        // Было: зелёная черта — отдельный Rectangle без высоты. Он жадный по вертикали
+        // и делил место с лентой, поэтому плашка иногда раздувалась на пол-экрана
+        // (баг Адильхана 09.10). Теперь черта — подложка текста и всегда равна его высоте.
         HStack(spacing: 10) {
-            Rectangle()
-                .fill(Color.accentColor)
-                .frame(width: 3)
-                .clipShape(Capsule())
-            VStack(alignment: .leading, spacing: 2) {
-                Text(loc.t("chats_msg_reply"))
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.accentColor)
-                Text(messagePreview(message))
-                    .font(.system(size: 12))
-                    .foregroundColor(.white.opacity(0.65))
-                    .lineLimit(1)
-            }
-            Spacer()
+            accentLabel(title: loc.t("chats_msg_reply"), preview: messagePreview(message))
+            Spacer(minLength: 8)
             Button {
                 replyingTo = nil
             } label: {
@@ -367,7 +393,71 @@ struct ChatThreadView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
+        .fixedSize(horizontal: false, vertical: true)
         .background(Color.white.opacity(0.05))
+    }
+
+    /// Заголовок + 1 строка превью с зелёной чертой слева (плашки «Ответить» и «Закреплено»).
+    private func accentLabel(title: String, preview: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.accentColor)
+            Text(preview.replacingOccurrences(of: "\n", with: " "))
+                .font(.system(size: 12))
+                .foregroundColor(.white.opacity(0.65))
+                .lineLimit(1)
+        }
+        .padding(.leading, 13)
+        .overlay(alignment: .leading) {
+            Capsule()
+                .fill(Color.accentColor)
+                .frame(width: 3)
+        }
+    }
+
+    /// Закреплённое сообщение для плашки: из ленты, а если оно старше загруженного — отдельно с сервера.
+    private var pinnedMessage: ChatMessageRow? {
+        guard let pinnedMessageID else { return nil }
+        return messages.first(where: { $0.id == pinnedMessageID })
+            ?? (pinnedMessageFallback?.id == pinnedMessageID ? pinnedMessageFallback : nil)
+    }
+
+    /// Плашка сверху чата, как в Telegram: тап — к сообщению, булавка — открепить.
+    @ViewBuilder
+    private var pinnedBanner: some View {
+        if let pinned = pinnedMessage {
+            HStack(spacing: 10) {
+                Button {
+                    Task { await jumpToPinned() }
+                } label: {
+                    HStack(spacing: 0) {
+                        accentLabel(title: loc.t("chats_pinned_banner_title"), preview: messagePreview(pinned))
+                        Spacer(minLength: 8)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                Button {
+                    toggleMessagePin(pinned)
+                } label: {
+                    Image(systemName: "pin.slash")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.55))
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(loc.t("chats_msg_unpin"))
+            }
+            .padding(.leading, 14)
+            .padding(.trailing, 8)
+            .padding(.vertical, 6)
+            .fixedSize(horizontal: false, vertical: true)
+            .background(Color(red: 0.08, green: 0.08, blue: 0.14).opacity(0.92))
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5)
+            }
+        }
     }
 
     private var inputBar: some View {
@@ -808,19 +898,60 @@ struct ChatThreadView: View {
         return peerUnread == 0
     }
 
+    /// Закрепить / открепить. Сразу меняем экран, потом сервер; отказал — возвращаем как было.
+    /// Новый закреп заменяет старый (один на чат, как в личке Telegram).
     private func toggleMessagePin(_ message: ChatMessageRow) {
-        if MessagesLocalState.isPinned(message.id) {
-            MessagesLocalState.unpin(message.id)
-        } else {
-            MessagesLocalState.pin(message.id)
+        let previousID = pinnedMessageID
+        let previousFallback = pinnedMessageFallback
+        let nextID: String? = previousID == message.id ? nil : message.id
+        pinnedMessageID = nextID
+        if nextID != nil { pinnedMessageFallback = message }
+        pinWriteInFlight = true
+        Task {
+            defer { pinWriteInFlight = false }
+            guard let token = await auth.freshAccessToken() else {
+                pinnedMessageID = previousID
+                pinnedMessageFallback = previousFallback
+                pinError = "Нет связи. Попробуйте ещё раз."
+                return
+            }
+            let ok = await service.setPinnedMessage(chatId: chat.id, messageId: nextID, accessToken: token)
+            guard !ok else { return }
+            pinnedMessageID = previousID
+            pinnedMessageFallback = previousFallback
+            pinError = nextID == nil ? "Не удалось открепить сообщение." : "Не удалось закрепить сообщение."
         }
-        messageStateTick &+= 1
     }
 
-    private func askStartupChat(about message: ChatMessageRow) {
-        replyingTo = message
-        draft = "StartupChat: \(messagePreview(message))"
-        inputFocused = true
+    /// Читает закреп с сервера. Если сообщение старше загруженной ленты — берём его отдельно для превью.
+    private func refreshPin() async {
+        guard let token = await auth.freshAccessToken(),
+              let state = await service.loadPinnedMessage(chatId: chat.id, accessToken: token),
+              !pinWriteInFlight
+        else { return }
+        pinnedMessageID = state.messageId
+        guard let id = state.messageId,
+              !messages.contains(where: { $0.id == id }),
+              pinnedMessageFallback?.id != id
+        else { return }
+        pinnedMessageFallback = await service.loadMessage(id: id, chatId: chat.id, accessToken: token)
+    }
+
+    /// Тап по плашке: если сообщения нет в ленте — догружаем старые страницы (до 10), потом прокрутка и подсветка.
+    private func jumpToPinned() async {
+        guard let id = pinnedMessageID else { return }
+        var pages = 0
+        while !visibleMessages.contains(where: { $0.id == id }), hasOlderMessages, pages < 10 {
+            await loadOlderMessages()
+            pages += 1
+        }
+        guard visibleMessages.contains(where: { $0.id == id }) else { return }
+        scrollTargetID = id
+        highlightedMessageID = id
+        try? await Task.sleep(nanoseconds: 1_400_000_000)
+        if highlightedMessageID == id {
+            withAnimation(.easeOut(duration: 0.3)) { highlightedMessageID = nil }
+        }
     }
 
     private func messagePreview(_ message: ChatMessageRow) -> String {
@@ -1157,11 +1288,11 @@ private struct Bubble: View {
     let isMine: Bool
     let isRead: Bool
     let isPinned: Bool
+    var isHighlighted: Bool = false
     let deliveryState: ChatDeliveryState
     var onCopy: (() -> Void)? = nil
     var onReply: (() -> Void)? = nil
     var onTogglePin: (() -> Void)? = nil
-    var onAskStartupChat: (() -> Void)? = nil
     var onRetry: (() -> Void)? = nil
     var onDeleteForMe: (() -> Void)? = nil
     @EnvironmentObject private var loc: LocalizationService
@@ -1180,15 +1311,16 @@ private struct Bubble: View {
                     Button { onReply?() } label: {
                         Label(loc.t("chats_msg_reply"), systemImage: "arrowshape.turn.up.left")
                     }
-                    Button { onTogglePin?() } label: {
-                        Label(
-                            isPinned ? loc.t("chats_msg_unpin") : loc.t("chats_msg_pin"),
-                            systemImage: isPinned ? "pin.slash" : "pin"
-                        )
+                    // Закрепить можно только то, что уже дошло до сервера (у неотправленного нет id в базе).
+                    if deliveryState == .sent, !message.id.hasPrefix("local-") {
+                        Button { onTogglePin?() } label: {
+                            Label(
+                                isPinned ? loc.t("chats_msg_unpin") : loc.t("chats_msg_pin"),
+                                systemImage: isPinned ? "pin.slash" : "pin"
+                            )
+                        }
                     }
-                    Button { onAskStartupChat?() } label: {
-                        Label(loc.t("chats_msg_ask_startupchat"), systemImage: "sparkles")
-                    }
+                    // «Спросить StartupChat» убрали: Адильхан 09.10 — «непонятно, можно убрать».
                     Divider()
                     if !copyText.isEmpty,
                        !["image", "audio", "video"].contains(message.type) {
@@ -1238,6 +1370,11 @@ private struct Bubble: View {
         .padding(["image", "video"].contains(message.type) ? 4 : (stickerText == nil ? (message.type == "task_card" ? 8 : 10) : 2))
         .background(stickerText == nil ? bubbleColor : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        // Подсветка после тапа по плашке закрепа — видно, к какому сообщению прыгнули.
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.accentColor, lineWidth: isHighlighted ? 2 : 0)
+        )
     }
 
     private var bubbleColor: Color {
@@ -1776,7 +1913,9 @@ private struct PrivateChatAudioBubble: View {
                     }
                 }
             }
-            .frame(width: 170)
+            // Было width: 170 — пузырь шире, справа оставалась пустота (Адильхан 09.10).
+            // Теперь полоска тянется на всю ширину пузыря, но не уже 170.
+            .frame(minWidth: 170, maxWidth: .infinity, alignment: .leading)
         }
         .task(id: message.id) {
             // Как в WhatsApp: длина видна до нажатия ▶. Ссылка кешируется в сервисе.

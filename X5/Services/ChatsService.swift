@@ -93,6 +93,16 @@ struct ChatMessageRow: Codable, Identifiable, Hashable {
     }
 }
 
+/// Закреп чата с сервера (chats.pinned_message_id). Отдельно от ChatRoom,
+/// чтобы не трогать кэш списка чатов и все `with(...)`.
+struct ChatPinState: Codable, Hashable {
+    let messageId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case messageId = "pinned_message_id"
+    }
+}
+
 struct ChatTaskCardPayload: Codable, Hashable {
     let id: String
     let title: String
@@ -719,6 +729,80 @@ final class ChatsService: ObservableObject {
         guard let (data, http) = await sendAuthed(request, accessToken: accessToken),
               (200..<300).contains(http.statusCode),
               let rows = try? JSONDecoder().decode([ChatRoom].self, from: data)
+        else { return nil }
+        return rows.first
+    }
+
+    // MARK: - Закреп сообщения (как в Telegram)
+    // Один закреп на чат, общий для обоих участников: поле chats.pinned_message_id
+    // (миграция 20261009190000). Раньше закреп жил только в UserDefaults одного телефона —
+    // плашки не было, собеседник и сайт его не видели (баг Адильхана 09.10).
+
+    /// nil — не удалось узнать (сеть, старая база без поля): экран оставляет то, что уже показывал.
+    /// `.init(messageId: nil)` — закрепа нет.
+    func loadPinnedMessage(chatId: String, accessToken: String) async -> ChatPinState? {
+        var components = URLComponents(url: baseURL.appendingPathComponent("rest/v1/chats"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "id", value: "eq.\(chatId)"),
+            URLQueryItem(name: "select", value: "pinned_message_id")
+        ]
+        var request = URLRequest(url: components.url!)
+        request.setValue(anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        // Не через sendAuthed: до миграции сервер ответит 400, а это не ошибка для пользователя.
+        guard let (data, response) = try? await session.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode),
+              let rows = try? JSONDecoder().decode([ChatPinState].self, from: data),
+              let row = rows.first
+        else { return nil }
+        return row
+    }
+
+    /// messageId == nil — открепить. Возвращает false, если сервер отказал.
+    func setPinnedMessage(chatId: String, messageId: String?, accessToken: String) async -> Bool {
+        var components = URLComponents(url: baseURL.appendingPathComponent("rest/v1/chats"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "id", value: "eq.\(chatId)")]
+        var patch = URLRequest(url: components.url!)
+        patch.httpMethod = "PATCH"
+        patch.setValue(anonKey, forHTTPHeaderField: "apikey")
+        patch.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        patch.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // representation — чтобы отличить «обновили» от «RLS молча не дал (0 строк)».
+        patch.setValue("return=representation", forHTTPHeaderField: "Prefer")
+        let value: Any = messageId.map { $0 as Any } ?? NSNull()
+        patch.httpBody = try? JSONSerialization.data(withJSONObject: ["pinned_message_id": value])
+        guard let (data, http) = await sendAuthed(patch, accessToken: accessToken),
+              (200..<300).contains(http.statusCode),
+              let rows = try? JSONDecoder().decode([ChatPinState].self, from: data),
+              let row = rows.first,
+              row.messageId == messageId
+        else {
+            // Свою ошибку экран показывает сам; общий error не держим, иначе он всплывёт
+            // позже в чужом алерте (например, «не отправилось фото»).
+            error = nil
+            return false
+        }
+        error = nil
+        return true
+    }
+
+    /// Одно сообщение по id — для превью в плашке, если закреп старше загруженной страницы.
+    /// Фильтр chat_id — чтобы в плашку не попало сообщение из чужого чата.
+    func loadMessage(id: String, chatId: String, accessToken: String) async -> ChatMessageRow? {
+        var components = URLComponents(url: baseURL.appendingPathComponent("rest/v1/messages"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "id", value: "eq.\(id)"),
+            URLQueryItem(name: "chat_id", value: "eq.\(chatId)"),
+            URLQueryItem(name: "select", value: "*")
+        ]
+        var request = URLRequest(url: components.url!)
+        request.setValue(anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        guard let (data, response) = try? await session.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode),
+              let rows = try? JSONDecoder().decode([ChatMessageRow].self, from: data)
         else { return nil }
         return rows.first
     }
