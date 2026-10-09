@@ -66,7 +66,6 @@ struct CourseEditorView: View {
     @State private var description: String = ""
     @State private var marketingHook: String = ""
     @State private var price: String = "0"
-    @State private var isFree: Bool = true
     @State private var isPublic: Bool = false
     @State private var courseLanguage: String = "ru"
     @State private var authorName: String = ""
@@ -143,19 +142,24 @@ struct CourseEditorView: View {
                         .lineLimit(3...8)
                 }
 
-                Section("Цена и доступ") {
-                    Toggle("Бесплатный", isOn: $isFree)
-                    if !isFree {
-                        HStack {
-                            Text("Цена, $")
-                            Spacer()
-                            TextField("0", text: $price)
-                                .keyboardType(.numberPad)
-                                .multilineTextAlignment(.trailing)
-                                .frame(width: 80)
-                        }
+                // Тумблер «Бесплатный» убрали (Адильхан 09.10: «по сути ненужная кнопка»):
+                // цена 0 = курс бесплатный. Цена в кредитах — за них же покупают курс и уроки
+                // (было «Цена, $», хотя списываются кредиты).
+                Section {
+                    HStack {
+                        Text("Цена курса, кредиты")
+                        Spacer()
+                        TextField("0", text: $price)
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 100)
                     }
                     Toggle("Опубликован", isOn: $isPublic)
+                } header: {
+                    Text("Цена и доступ")
+                } footer: {
+                    Text("0 — курс бесплатный. Уроки «продавать отдельно» остаются платными и в бесплатном курсе.")
+                        .font(.footnote)
                 }
 
                 Section("Язык") {
@@ -456,7 +460,6 @@ struct CourseEditorView: View {
         description = c.description ?? ""
         marketingHook = c.marketingHook ?? ""
         price = String(c.price ?? 0)
-        isFree = c.isFree ?? false
         isPublic = c.isPublic ?? false
         courseLanguage = c.courseLanguage ?? "ru"
         selectedAuthorId = c.authorId
@@ -669,7 +672,7 @@ struct CourseEditorView: View {
     private func courseFields(publishAsChosen: Bool) -> [String: Any] {
         // Callers run only after the author was validated in save().
         let resolvedAuthorId = self.resolvedAuthorId ?? ""
-        let priceInt = Int(price) ?? 0
+        let priceInt = max(Int(price.x5Trimmed) ?? 0, 0)
         return [
             "title": title,
             "description": description.x5Trimmed.isEmpty ? NSNull() : description,
@@ -678,7 +681,8 @@ struct CourseEditorView: View {
             "author_id": resolvedAuthorId,
             "cover_url": coverUrl?.x5Trimmed.isEmpty == false ? (coverUrl ?? "") : NSNull(),
             "price": priceInt,
-            "is_free": isFree,
+            // Бесплатность — только из цены: тумблера больше нет, два поля не спорят.
+            "is_free": priceInt == 0,
             // Checkpoints never change visibility: a new course stays hidden and
             // an existing one keeps its server state until the final save.
             "is_public": publishAsChosen ? isPublic : (editing?.isPublic ?? false),

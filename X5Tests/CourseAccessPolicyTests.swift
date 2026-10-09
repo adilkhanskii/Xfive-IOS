@@ -59,6 +59,30 @@ final class CourseAccessPolicyTests: XCTestCase {
         XCTAssertFalse(CourseAccessPolicy.hasFullAccess(to: course, profile: profile))
     }
 
+    /// Адильхан 09.10: урок за 1000 в курсе с ценой 0 открывался любому аккаунту.
+    /// Правило как на сервере: бесплатный курс открывает только НЕплатные уроки.
+    func testSeparatelySoldLessonStaysLockedInFreeCourse() {
+        let course = makeCourse(id: "course-zero", price: 0, isFree: false, authorId: "author-1")
+        let paidLesson = makeSellableLesson(id: "lesson-paid")
+        let regularLesson = makeSellableLesson(id: "lesson-regular", sellSeparately: false)
+
+        XCTAssertFalse(CourseAccessPolicy.canAccess(lesson: paidLesson, in: course, profile: makeProfile()))
+        XCTAssertTrue(CourseAccessPolicy.canAccess(lesson: regularLesson, in: course, profile: makeProfile()))
+
+        let buyer = makeProfile(purchasedLessonIds: ["course-zero:lesson-paid"])
+        XCTAssertTrue(CourseAccessPolicy.canAccess(lesson: paidLesson, in: course, profile: buyer))
+    }
+
+    func testAuthorOpensSeparatelySoldLessonInFreeCourse() {
+        let course = makeCourse(id: "course-zero", price: 0, isFree: true, authorId: "user-1")
+
+        XCTAssertTrue(CourseAccessPolicy.canAccess(
+            lesson: makeSellableLesson(id: "lesson-paid"),
+            in: course,
+            profile: makeProfile()
+        ))
+    }
+
     func testLessonEntitlementIsScopedToItsOwnCourse() {
         let course = makeCourse(id: "course-paid", price: 50_000, isFree: false)
         let lesson = makeSellableLesson(id: "lesson-paid")

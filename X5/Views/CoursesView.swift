@@ -1258,9 +1258,10 @@ struct CourseDetailView: View {
     /// Price of a lesson that may be bought on its own, or nil when it only
     /// unlocks with the whole course. Already-owned lessons show no price.
     private func separatePrice(for lesson: CourseLesson) -> Int? {
-        guard !hasFullAccess,
-              CourseAccessPolicy.isSoldSeparately(lesson),
-              !CourseAccessPolicy.hasPurchasedLesson(lesson, in: course, profile: activeProfile)
+        // Не через hasFullAccess: в бесплатном курсе он true, и платный урок раньше
+        // не получал ни замка, ни цены. Решает общее правило доступа к уроку.
+        guard CourseAccessPolicy.isSoldSeparately(lesson),
+              !CourseAccessPolicy.canAccess(lesson: lesson, in: course, profile: activeProfile)
         else { return nil }
         return lessonPrice(for: lesson)
     }

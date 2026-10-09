@@ -38,13 +38,30 @@ enum CourseAccessPolicy {
         return profile?.purchasedLessonIds?.contains(key) == true
     }
 
+    /// Автор курса или тот, кто купил курс целиком: открыто всё, включая уроки «отдельно».
+    static func ownsWholeCourse(_ course: Course, profile: UserProfile?) -> Bool {
+        if let authorId = course.authorId,
+           profile?.id.caseInsensitiveCompare(authorId) == .orderedSame {
+            return true
+        }
+        if Roles.isDeveloper(email: nil, userId: profile?.id) { return true }
+        return profile?.purchasedCourseIds?.contains(course.id) == true
+    }
+
+    /// Те же правила, что на сервере (course_video_playback_grant, миграция 20261009200000):
+    /// урок, который автор продаёт отдельно, закрыт даже в бесплатном курсе.
+    /// Было: «курс за 0 = открыто всё» — платный урок в бесплатном курсе открывался всем (Адильхан 09.10).
     static func canAccess(
         lesson: CourseLesson,
         in course: Course,
         profile: UserProfile?
     ) -> Bool {
-        if hasFullAccess(to: course, profile: profile) { return true }
+        if ownsWholeCourse(course, profile: profile) { return true }
         if lesson.freePreview { return true }
+        if isSoldSeparately(lesson) {
+            return hasPurchasedLesson(lesson, in: course, profile: profile)
+        }
+        if hasFullAccess(to: course, profile: profile) { return true }
         return hasPurchasedLesson(lesson, in: course, profile: profile)
     }
 }
