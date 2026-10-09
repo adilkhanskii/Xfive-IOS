@@ -117,10 +117,11 @@ class IOSCourseClientUISourceTests(unittest.TestCase):
         academy = courses.split("ForEach(Array(academyCourses")[1].split(".padding(.horizontal, 16)")[0]
         for cards in (featured, academy):
             self.assertIn("if isDev {", cards)
-            # 08.10: long-press context menu replaced by drag-to-reorder for
-            # developers; edit stays on the visible pencil, delete in the editor.
+            # 09.10: drag-to-reorder removed from the catalog (Adilkhan: laggy);
+            # order changes only in the ↑↓ sheet; edit stays on the pencil.
             self.assertEqual(cards.count("editorTarget = .edit(course)"), 1)
-            self.assertIn(".modifier(dragReorder(for: course))", cards)
+            self.assertNotIn("dragReorder", cards)
+            self.assertNotIn(".onDrag", cards)
             self.assertNotIn(".contextMenu", cards)
             self.assertIn("CourseDetailView(course: course", cards)
             self.assertNotIn("CourseInDevelopmentView", cards)
