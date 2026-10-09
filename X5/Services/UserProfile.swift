@@ -366,9 +366,9 @@ final class CurrentUser: ObservableObject {
                 if row.id.caseInsensitiveCompare(profile?.id ?? "") == .orderedSame {
                     row.accessExpiry = profile?.accessExpiry
                 }
-                guard commit(row, for: context) else { return false }
-                await loadAccessExpiry(accessToken: accessToken, context: context)
-                return true
+                // Сами сроки грузит экран курса (refreshAccessExpiry): загрузка профиля
+                // остаётся одним запросом — на этом держится защита от гонок аккаунтов.
+                return commit(row, for: context)
             } else {
                 // Profile row missing — create one (covers users registered before the
                 // auth.users -> profiles Postgres trigger existed).
@@ -388,6 +388,12 @@ final class CurrentUser: ObservableObject {
             case accessKey = "access_key"
             case expiresAt = "expires_at"
         }
+    }
+
+    /// Сроки доступа для текущего аккаунта — зовёт экран курса при открытии.
+    func refreshAccessExpiry(accessToken: String) async {
+        guard let context = operationContext() else { return }
+        await loadAccessExpiry(accessToken: accessToken, context: context)
     }
 
     /// Сроки доступа (course_access_expiry, видны только свои строки по RLS).

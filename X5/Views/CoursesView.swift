@@ -1019,6 +1019,11 @@ struct CourseDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .onAppear { expandAllIfNeeded() }
+        // Свежие сроки доступа (30 дней) при каждом открытии курса.
+        .task {
+            guard auth.isAuthenticated, let token = await auth.freshAccessToken() else { return }
+            await currentUser.refreshAccessExpiry(accessToken: token)
+        }
         .confirmationDialog(
             "Открыть курс на 30 дней?",
             isPresented: $showingPurchaseConfirmation,
