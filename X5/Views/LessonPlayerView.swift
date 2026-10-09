@@ -147,6 +147,14 @@ private struct BunnyLessonVideoLoader: View {
     }
 }
 
+/// Сколько места занимают системные полосы управления VideoPlayer сверху и снизу.
+/// В точках они одинаковые на всех iPhone, поэтому константа, а не расчёт.
+/// идея: если перейти на AVPlayerViewController со своими кнопками — отступы не нужны.
+private enum SystemPlayerChrome {
+    static let topClearance: CGFloat = 60
+    static let bottomClearance: CGFloat = 72
+}
+
 /// AVPlayer surface with quality menu, full screen and connection status.
 private struct LessonVideoSurface: View {
     @StateObject private var playback: CourseVideoPlaybackController
@@ -187,7 +195,12 @@ private struct LessonVideoSurface: View {
 
                 CoursePlaybackStatus(playback: playback)
             }
-            .padding()
+            // Системные кнопки VideoPlayer (AirPlay/PiP слева, звук справа сверху, полоса
+            // перемотки снизу) стоят в тех же углах — наши «Авто» и «на весь экран» на них
+            // наезжали (Адильхан 09.10). Уводим свои кнопки ниже/выше системных полос.
+            .padding(.horizontal)
+            .padding(.top, SystemPlayerChrome.topClearance)
+            .padding(.bottom, SystemPlayerChrome.bottomClearance)
         }
         .background(Color.black)
         .onAppear {
@@ -395,13 +408,14 @@ private struct FullScreenVideoPlayer: View {
                 }
                 .padding(.leading, max(16, proxy.safeAreaInsets.leading))
                 .padding(.trailing, max(16, proxy.safeAreaInsets.trailing))
-                .padding(.top, max(12, proxy.safeAreaInsets.top))
+                // Ниже системной полосы VideoPlayer (AirPlay, звук) — иначе крестик и сброс зума на неё наезжают.
+                .padding(.top, max(12, proxy.safeAreaInsets.top) + SystemPlayerChrome.topClearance)
 
                 VStack {
                     Spacer()
                     CoursePlaybackStatus(playback: playback)
                         .padding(.horizontal, 16)
-                        .padding(.bottom, max(52, proxy.safeAreaInsets.bottom + 40))
+                        .padding(.bottom, proxy.safeAreaInsets.bottom + SystemPlayerChrome.bottomClearance)
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)

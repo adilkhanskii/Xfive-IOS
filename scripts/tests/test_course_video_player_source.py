@@ -35,6 +35,14 @@ class CourseVideoPlayerSourceTests(unittest.TestCase):
         self.assertIn("/playlist.m3u8", source)
         self.assertNotIn("UIApplication.shared.open", source)
 
+    def test_custom_buttons_do_not_overlap_system_player_chrome(self) -> None:
+        # Адильхан 09.10: AirPlay наезжал на «Авто», звук — на «на весь экран».
+        player = PLAYER.read_text(encoding="utf-8")
+
+        self.assertIn("static let topClearance: CGFloat = 60", player)
+        self.assertIn(".padding(.top, SystemPlayerChrome.topClearance)", player)
+        self.assertIn("max(12, proxy.safeAreaInsets.top) + SystemPlayerChrome.topClearance", player)
+
 
 if __name__ == "__main__":
     unittest.main()
