@@ -343,10 +343,14 @@ jobs:
           deno check supabase/functions/course-video-bunny-mirror/index.ts
           deno lint supabase/functions/course-video-bunny-mirror
           deno fmt --check supabase/functions/course-video-bunny-mirror
+          deno check supabase/functions/course-video-legacy-import/index.ts
+          deno lint supabase/functions/course-video-legacy-import
+          deno fmt --check supabase/functions/course-video-legacy-import
           node --test \
             supabase/functions/create-course-video-upload/*.test.mjs \
             supabase/functions/course-video-playback/*.test.mjs \
-            supabase/functions/course-video-status/*.test.mjs             supabase/functions/course-video-bunny-mirror/*.test.mjs
+            supabase/functions/course-video-status/*.test.mjs             supabase/functions/course-video-bunny-mirror/*.test.mjs \
+            supabase/functions/course-video-legacy-import/*.test.mjs
 
       - name: Verify release automation contracts
         run: python3 -m unittest discover -s scripts/tests -p "test_*.py"
