@@ -62,7 +62,8 @@ class LessonPurchaseSourceTests(unittest.TestCase):
     def test_locked_sellable_lesson_offers_itself_before_the_whole_course(self):
         view = COURSES_VIEW.read_text(encoding="utf-8")
 
-        self.assertIn('"Купить только этот урок?"', view)
+        # 09.10: покупка урока — доступ на 30 дней (Адильхан).
+        self.assertIn('"Разблокировать урок на 30 дней?"', view)
         self.assertIn("await completeLessonPurchase(lesson)", view)
         self.assertIn("private func separatePrice(for lesson: CourseLesson) -> Int?", view)
         self.assertIn("if let lesson, separatePrice(for: lesson) != nil {", view)

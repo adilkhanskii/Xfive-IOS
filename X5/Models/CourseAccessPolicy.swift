@@ -11,7 +11,27 @@ enum CourseAccessPolicy {
             return true
         }
 
-        return profile?.purchasedCourseIds?.contains(course.id) == true
+        return hasActivePurchasedCourse(course, profile: profile)
+    }
+
+    // MARK: - Срок доступа (30 дней, Адильхан 09.10)
+
+    /// Когда кончается купленный доступ по ключу ('<course>' или '<course>:<lesson>').
+    /// nil — срока нет (старая покупка или приглашение = навсегда).
+    static func accessExpiresAt(key: String, profile: UserProfile?) -> Date? {
+        UserProfile.parseTimestamp(profile?.accessExpiry?[key])
+    }
+
+    /// Ключ действует, если срока нет или он ещё не прошёл. Сервер проверяет так же
+    /// (course_video_playback_grant), а раз в час убирает истёкшие ключи из профиля.
+    static func isAccessKeyActive(_ key: String, profile: UserProfile?, now: Date = Date()) -> Bool {
+        guard let expiresAt = accessExpiresAt(key: key, profile: profile) else { return true }
+        return expiresAt > now
+    }
+
+    static func hasActivePurchasedCourse(_ course: Course, profile: UserProfile?) -> Bool {
+        profile?.purchasedCourseIds?.contains(course.id) == true
+            && isAccessKeyActive(course.id, profile: profile)
     }
 
     /// Key the server writes into `purchased_lesson_ids` for a single paid
@@ -36,6 +56,7 @@ enum CourseAccessPolicy {
     ) -> Bool {
         let key = lessonEntitlementKey(courseId: course.id, lessonId: lesson.id)
         return profile?.purchasedLessonIds?.contains(key) == true
+            && isAccessKeyActive(key, profile: profile)
     }
 
     /// Автор курса или тот, кто купил курс целиком: открыто всё, включая уроки «отдельно».
@@ -45,7 +66,7 @@ enum CourseAccessPolicy {
             return true
         }
         if Roles.isDeveloper(email: nil, userId: profile?.id) { return true }
-        return profile?.purchasedCourseIds?.contains(course.id) == true
+        return hasActivePurchasedCourse(course, profile: profile)
     }
 
     /// Те же правила, что на сервере (course_video_playback_grant, миграция 20261009200000):

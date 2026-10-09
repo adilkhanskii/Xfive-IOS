@@ -59,7 +59,7 @@ class ReleaseVersionSourceTests(unittest.TestCase):
         # 08.10: 248 — ползунок голосовых + порядок курсов; 249 — то же +
         # перетаскивание карточек курсов в каталоге);
         # цель ревью App Store ниже остаётся 243.
-        self.assertEqual(runtime_build_number, "250")
+        self.assertEqual(runtime_build_number, "251")
         self.assertEqual(fastlane_version, marketing_version)
         self.assertIn(
             f"Version {marketing_version} build 243",

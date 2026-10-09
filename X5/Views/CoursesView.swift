@@ -969,6 +969,16 @@ struct CourseDetailView: View {
 
                 if !hasFullAccess {
                     purchaseButton
+                } else if CourseAccessPolicy.hasActivePurchasedCourse(course, profile: activeProfile),
+                          let until = CourseAccessPolicy.accessExpiresAt(key: course.id, profile: activeProfile) {
+                    // Курс куплен на 30 дней — показываем, до какого числа.
+                    HStack(spacing: 6) {
+                        Image(systemName: "clock")
+                        Text("Курс куплен")
+                        AccessUntilBadge(until: until)
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.7))
                 }
 
                 lessonsHeader
@@ -988,6 +998,12 @@ struct CourseDetailView: View {
                                 profile: activeProfile
                             ),
                             separatePrice: separatePrice(for: lesson),
+                            openUntil: CourseAccessPolicy.hasPurchasedLesson(lesson, in: course, profile: activeProfile)
+                                ? CourseAccessPolicy.accessExpiresAt(
+                                    key: CourseAccessPolicy.lessonEntitlementKey(courseId: course.id, lessonId: lesson.id),
+                                    profile: activeProfile
+                                )
+                                : nil,
                             requestUnlock: { requestUnlock(lesson: lesson) }
                         )
                     }
@@ -1004,19 +1020,19 @@ struct CourseDetailView: View {
         .toolbarColorScheme(.dark, for: .navigationBar)
         .onAppear { expandAllIfNeeded() }
         .confirmationDialog(
-            "Купить курс?",
+            "Открыть курс на 30 дней?",
             isPresented: $showingPurchaseConfirmation,
             titleVisibility: .visible
         ) {
-            Button("Купить за \(formattedPrice) кредитов") {
+            Button("Открыть за \(formattedPrice) кредитов") {
                 Task { await completePurchase() }
             }
             Button("Отмена", role: .cancel) {}
         } message: {
-            Text("Баланс: \(formattedCredits) кредитов. Списание и выдача доступа выполняются одной операцией.")
+            Text("Баланс: \(formattedCredits) кредитов. Доступ ко всем урокам на 30 дней, потом можно продлить.")
         }
         .confirmationDialog(
-            "Купить только этот урок?",
+            "Разблокировать урок на 30 дней?",
             isPresented: Binding(
                 get: { lessonToBuy != nil },
                 set: { if !$0 { lessonToBuy = nil } }
@@ -1024,14 +1040,14 @@ struct CourseDetailView: View {
             titleVisibility: .visible
         ) {
             if let lesson = lessonToBuy {
-                Button("Купить за \(lessonPrice(for: lesson).formatted()) кредитов") {
+                Button("Разблокировать за \(lessonPrice(for: lesson).formatted()) кредитов") {
                     Task { await completeLessonPurchase(lesson) }
                 }
             }
             Button("Отмена", role: .cancel) { lessonToBuy = nil }
         } message: {
             if let lesson = lessonToBuy {
-                Text("\(lesson.title)\nБаланс: \(formattedCredits) кредитов. Откроется только этот урок, остальной курс останется закрытым.")
+                Text("\(lesson.title)\nБаланс: \(formattedCredits) кредитов. Урок откроется на 30 дней, остальной курс останется закрытым.")
             }
         }
         .alert(item: $purchaseNotice) { notice in
@@ -1055,7 +1071,7 @@ struct CourseDetailView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Купить курс · \(formattedPrice) кредитов")
+                    Text("Открыть курс на 30 дней · \(formattedPrice) кредитов")
                         .font(.system(size: 15, weight: .bold))
                     Text("Баланс: \(formattedCredits)")
                         .font(.system(size: 11, weight: .semibold))
@@ -1529,6 +1545,30 @@ private struct LockedSoonLessonRow: View {
     }
 }
 
+/// «Открыто до 08.11» — купленный доступ на 30 дней. За 3 дня до конца — оранжевым,
+/// чтобы успели досмотреть или продлить.
+private struct AccessUntilBadge: View {
+    let until: Date
+
+    private var endsSoon: Bool { until.timeIntervalSinceNow < 3 * 24 * 3600 }
+
+    private static let formatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "dd.MM"
+        return f
+    }()
+
+    var body: some View {
+        Text("Открыто до \(Self.formatter.string(from: until))")
+            .font(.system(size: 9, weight: .heavy))
+            .padding(.horizontal, 5).padding(.vertical, 2)
+            .background((endsSoon ? Color.orange : Color.white).opacity(0.14))
+            .foregroundColor(endsSoon ? .orange : .white.opacity(0.75))
+            .clipShape(Capsule())
+            .accessibilityLabel("Доступ открыт до \(Self.formatter.string(from: until))")
+    }
+}
+
 private struct LessonRow: View {
     let lesson: CourseLesson
     let courseID: String
@@ -1536,6 +1576,8 @@ private struct LessonRow: View {
     /// Price to show when this single lesson can be bought on its own. Nil when
     /// the lesson only comes with the whole course.
     var separatePrice: Int? = nil
+    /// Урок куплен на 30 дней — до какого числа открыт (nil — без срока).
+    var openUntil: Date? = nil
     let requestUnlock: () -> Void
     @EnvironmentObject private var loc: LocalizationService
     @EnvironmentObject private var auth: Auth
@@ -1604,6 +1646,9 @@ private struct LessonRow: View {
                                 .background(Color.accentColor.opacity(0.18))
                                 .foregroundColor(.accentColor)
                                 .clipShape(Capsule())
+                        }
+                        if canPlay, let openUntil {
+                            AccessUntilBadge(until: openUntil)
                         }
                     }
                 }

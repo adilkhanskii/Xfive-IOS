@@ -45,6 +45,10 @@ struct UserProfile: Codable, Equatable, Identifiable {
     var city: String?
     var registrationPlatform: String?
     var onboardingCompletedAt: String?
+    /// Срок доступа к купленным курсам/урокам: ключ как в purchased_*_ids → ISO-дата конца.
+    /// Не колонка profiles: грузится из course_access_expiry (30 дней, Адильхан 09.10),
+    /// кодируется только в локальный кэш профиля. Ключа нет = старая покупка = навсегда.
+    var accessExpiry: [String: String]?
 
     enum CodingKeys: String, CodingKey {
         case id, name, nickname, email, avatar, bio, services, plan, credits, language
@@ -66,6 +70,15 @@ struct UserProfile: Codable, Equatable, Identifiable {
         case city
         case registrationPlatform = "registration_platform"
         case onboardingCompletedAt = "onboarding_completed_at"
+        case accessExpiry = "x5_access_expiry"
+    }
+
+    /// timestamptz из Postgres («2026-11-08T14:30:00.123456+00:00») → Date.
+    static func parseTimestamp(_ raw: String?) -> Date? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
     }
 
     var displayName: String {
@@ -289,6 +302,10 @@ final class CurrentUser: ObservableObject {
                 purchased.append(response.courseId)
             }
             profile.purchasedCourseIds = purchased
+            // Новый срок 30 дней — сразу на экран, не дожидаясь перезагрузки профиля.
+            if let expiresAt = response.accessExpiresAt {
+                profile.accessExpiry = (profile.accessExpiry ?? [:]).merging([response.courseId: expiresAt]) { _, new in new }
+            }
         }
         self.profile = profile
     }
@@ -310,6 +327,9 @@ final class CurrentUser: ObservableObject {
                 purchased.append(response.lessonKey)
             }
             profile.purchasedLessonIds = purchased
+            if let expiresAt = response.accessExpiresAt {
+                profile.accessExpiry = (profile.accessExpiry ?? [:]).merging([response.lessonKey: expiresAt]) { _, new in new }
+            }
         }
         self.profile = profile
     }
@@ -340,8 +360,15 @@ final class CurrentUser: ObservableObject {
                 throw NSError(domain: "CurrentUser", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: body])
             }
             let rows = try JSONDecoder().decode([UserProfile].self, from: data)
-            if let row = rows.first {
-                return commit(row, for: context)
+            if var row = rows.first {
+                // Сроки доступа живут в другой таблице: держим прежние, пока грузятся свежие,
+                // чтобы надпись «открыто до …» не мигала.
+                if row.id.caseInsensitiveCompare(profile?.id ?? "") == .orderedSame {
+                    row.accessExpiry = profile?.accessExpiry
+                }
+                guard commit(row, for: context) else { return false }
+                await loadAccessExpiry(accessToken: accessToken, context: context)
+                return true
             } else {
                 // Profile row missing — create one (covers users registered before the
                 // auth.users -> profiles Postgres trigger existed).
@@ -351,6 +378,38 @@ final class CurrentUser: ObservableObject {
             if isCurrent(context) { self.error = error.localizedDescription }
             return false
         }
+    }
+
+    private struct AccessExpiryRow: Decodable {
+        let accessKey: String
+        let expiresAt: String
+
+        enum CodingKeys: String, CodingKey {
+            case accessKey = "access_key"
+            case expiresAt = "expires_at"
+        }
+    }
+
+    /// Сроки доступа (course_access_expiry, видны только свои строки по RLS).
+    /// Ошибка или старая база без таблицы — оставляем как было: сервер всё равно
+    /// сам не выдаст видео по истёкшему доступу.
+    private func loadAccessExpiry(accessToken: String, context: ProfileOperationContext) async {
+        var components = URLComponents(url: baseURL.appendingPathComponent("rest/v1/course_access_expiry"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "select", value: "access_key,expires_at")]
+        var request = URLRequest(url: components.url!)
+        request.setValue(anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        guard let (data, response) = try? await session.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode),
+              let rows = try? JSONDecoder().decode([AccessExpiryRow].self, from: data),
+              isCurrent(context),
+              var current = profile,
+              current.id.lowercased() == context.userID
+        else { return }
+        current.accessExpiry = Dictionary(rows.map { ($0.accessKey, $0.expiresAt) }) { _, last in last }
+        profile = current
     }
 
     private func ensureProfile(userId: String, accessToken: String, context: ProfileOperationContext) async -> Bool {

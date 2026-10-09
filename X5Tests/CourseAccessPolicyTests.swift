@@ -73,6 +73,32 @@ final class CourseAccessPolicyTests: XCTestCase {
         XCTAssertTrue(CourseAccessPolicy.canAccess(lesson: paidLesson, in: course, profile: buyer))
     }
 
+    /// Доступ на 30 дней (Адильхан 09.10): после срока урок снова закрыт, даже если
+    /// ключ ещё лежит в профиле (сервер убирает его раз в час).
+    func testPurchasedLessonLocksAfterExpiry() {
+        let course = makeCourse(id: "course-zero", price: 0, isFree: false, authorId: "author-1")
+        let lesson = makeSellableLesson(id: "lesson-paid")
+        var profile = makeProfile(purchasedLessonIds: ["course-zero:lesson-paid"])
+
+        profile.accessExpiry = ["course-zero:lesson-paid": "2099-01-01T00:00:00.123456+00:00"]
+        XCTAssertTrue(CourseAccessPolicy.canAccess(lesson: lesson, in: course, profile: profile))
+        XCTAssertNotNil(CourseAccessPolicy.accessExpiresAt(key: "course-zero:lesson-paid", profile: profile))
+
+        profile.accessExpiry = ["course-zero:lesson-paid": "2020-01-01T00:00:00+00:00"]
+        XCTAssertFalse(CourseAccessPolicy.canAccess(lesson: lesson, in: course, profile: profile))
+    }
+
+    func testPurchasedCourseLocksAfterExpiryButOldPurchaseIsForever() {
+        let course = makeCourse(id: "course-paid", price: 50_000, isFree: false)
+        var profile = makeProfile(purchasedCourseIds: ["course-paid"])
+
+        // Старая покупка без срока — навсегда.
+        XCTAssertTrue(CourseAccessPolicy.hasFullAccess(to: course, profile: profile))
+
+        profile.accessExpiry = ["course-paid": "2020-01-01T00:00:00.5+00:00"]
+        XCTAssertFalse(CourseAccessPolicy.hasFullAccess(to: course, profile: profile))
+    }
+
     func testAuthorOpensSeparatelySoldLessonInFreeCourse() {
         let course = makeCourse(id: "course-zero", price: 0, isFree: true, authorId: "user-1")
 

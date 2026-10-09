@@ -55,6 +55,8 @@ struct LessonPurchaseResponse: Codable, Equatable {
     let creditsRemaining: Int?
     let lessonPrice: Int?
     let chargedAmount: Int?
+    /// Конец доступа (30 дней) — сервер присылает при status purchased; у старой базы поля нет.
+    var accessExpiresAt: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case status
@@ -64,6 +66,7 @@ struct LessonPurchaseResponse: Codable, Equatable {
         case creditsRemaining = "credits_remaining"
         case lessonPrice = "lesson_price"
         case chargedAmount = "charged_amount"
+        case accessExpiresAt = "access_expires_at"
     }
 
     /// Ownership counts only when the server also returned the key it stored,
@@ -87,6 +90,8 @@ struct CoursePurchaseResponse: Codable, Equatable {
     let creditsRemaining: Int?
     let coursePrice: Int?
     let chargedAmount: Int?
+    /// Конец доступа (30 дней) — сервер присылает при status purchased; у старой базы поля нет.
+    var accessExpiresAt: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case status
@@ -94,6 +99,7 @@ struct CoursePurchaseResponse: Codable, Equatable {
         case creditsRemaining = "credits_remaining"
         case coursePrice = "course_price"
         case chargedAmount = "charged_amount"
+        case accessExpiresAt = "access_expires_at"
     }
 
     var grantsOwnership: Bool {
