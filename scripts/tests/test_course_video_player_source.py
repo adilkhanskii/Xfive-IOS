@@ -41,7 +41,24 @@ class CourseVideoPlayerSourceTests(unittest.TestCase):
 
         self.assertIn("static let topClearance: CGFloat = 60", player)
         self.assertIn(".padding(.top, SystemPlayerChrome.topClearance)", player)
-        self.assertIn("max(12, proxy.safeAreaInsets.top) + SystemPlayerChrome.topClearance", player)
+
+    def test_fullscreen_zoom_scales_only_the_picture(self) -> None:
+        # Адильхан 09.10 22:30: при зуме пауза и ползунок увеличивались вместе с видео.
+        player = PLAYER.read_text(encoding="utf-8")
+        fullscreen = player[player.index("private struct FullScreenVideoPlayer"):player.index("private final class PlayerTimeline")]
+
+        self.assertNotIn("VideoPlayer(player:", fullscreen)
+        self.assertIn("PlayerLayerView(player: playback.player)", fullscreen)
+        picture = fullscreen.index("PlayerLayerView(player: playback.player)")
+        self.assertLess(picture, fullscreen.index(".scaleEffect(displayedScale)"))
+        self.assertLess(fullscreen.index(".scaleEffect(displayedScale)"), fullscreen.index("controls(in: proxy)"))
+        self.assertIn('"gobackward.10"', fullscreen)
+        self.assertIn('"goforward.10"', fullscreen)
+        self.assertIn("Slider(", fullscreen)
+        # Кнопки прячутся сами и по тапу (скрин 22:29 — «торчат посередине и не убираются»).
+        self.assertIn("controlsVisible = false", fullscreen)
+        self.assertIn(".allowsHitTesting(controlsVisible)", fullscreen)
+        self.assertIn("if isZoomed {", fullscreen)
 
 
 if __name__ == "__main__":

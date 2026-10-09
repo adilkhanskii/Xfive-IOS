@@ -27,6 +27,12 @@ struct ImageGeneratorView: View {
     @State private var logoImage: ImageReferenceAsset?
     @State private var referenceImages: [ImageReferenceAsset] = []
     @State private var isLoadingReferences = false
+    // Отдельные флаги для «Фото героя»/«Основная фотография» и логотипа:
+    // раньше у них не было ни спиннера, ни ошибки — фото из iCloud грузилось
+    // секунды или падало молча, и казалось, что выбор «не прикрепился».
+    @State private var isLoadingMainPhoto = false
+    @State private var isLoadingLogo = false
+    @State private var photoLoadError: String?
     @State private var selectedSalesAngle: SalesAngle
     /// Layout recipe used by the previous sales creative, so the next one is
     /// never the same composition twice in a row.
@@ -124,10 +130,13 @@ struct ImageGeneratorView: View {
             Task { await loadReferenceImages(newItems) }
         }
         .onChange(of: mainPhotoItem) { newItem in
-            Task { mainPhoto = await loadReferenceImage(newItem) }
+            // nil — это наш сброс выбора после загрузки, а не «убрать фото».
+            guard let newItem else { return }
+            Task { await loadSinglePhoto(newItem, slot: .main) }
         }
         .onChange(of: logoItem) { newItem in
-            Task { logoImage = await loadReferenceImage(newItem) }
+            guard let newItem else { return }
+            Task { await loadSinglePhoto(newItem, slot: .logo) }
         }
         .onChange(of: selectedProvider) { provider in
             if !selectedSize.isSupported(by: provider) {
@@ -201,7 +210,7 @@ struct ImageGeneratorView: View {
                         X5Feedback.selection()
                         selectedProvider = model
                     } label: {
-                        Label(model.title, systemImage: model == selectedProvider ? "checkmark" : model.menuSystemImage)
+                        menuChoiceLabel(model.title, isSelected: model == selectedProvider)
                     }
                 }
             } label: {
@@ -279,7 +288,7 @@ struct ImageGeneratorView: View {
                             X5Feedback.selection()
                             selectedSize = size
                         } label: {
-                            Label("\(size.title) · \(size.subtitle)", systemImage: size == selectedSize ? "checkmark" : "rectangle")
+                            menuChoiceLabel("\(size.title) · \(size.subtitle)", isSelected: size == selectedSize)
                         }
                     }
                 }
@@ -320,10 +329,7 @@ struct ImageGeneratorView: View {
                         X5Feedback.selection()
                         selectedSalesAngle = angle
                     } label: {
-                        Label(
-                            angle.title,
-                            systemImage: angle == selectedSalesAngle ? "checkmark" : "megaphone"
-                        )
+                        menuChoiceLabel(angle.title, isSelected: angle == selectedSalesAngle)
                     }
                 }
             } label: {
@@ -444,6 +450,19 @@ struct ImageGeneratorView: View {
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
+    /// Пункт меню выбора: у выбранного — галочка, у остальных — ничего.
+    /// Зачем: раньше невыбранные пункты показывали свои иконки (квадрат, искры,
+    /// зелёный кружок), и было непонятно, что выбрано (Адильхан 09.10, «галочки»).
+    /// Замки у недоступных размеров остаются — это другой смысл.
+    @ViewBuilder
+    private func menuChoiceLabel(_ title: String, isSelected: Bool) -> some View {
+        if isSelected {
+            Label(title, systemImage: "checkmark")
+        } else {
+            Text(title)
+        }
+    }
+
     private func productMenu(
         title: String,
         value: Binding<String>,
@@ -451,7 +470,11 @@ struct ImageGeneratorView: View {
     ) -> some View {
         Menu {
             ForEach(values, id: \.self) { option in
-                Button(option) { value.wrappedValue = option }
+                Button {
+                    value.wrappedValue = option
+                } label: {
+                    menuChoiceLabel(option, isSelected: option == value.wrappedValue)
+                }
             }
         } label: {
             HStack {
@@ -485,10 +508,7 @@ struct ImageGeneratorView: View {
                         X5Feedback.selection()
                         selectedYouTubeMode = mode
                     } label: {
-                        Label(
-                            mode.title,
-                            systemImage: mode == selectedYouTubeMode ? "checkmark" : mode.icon
-                        )
+                        menuChoiceLabel(mode.title, isSelected: mode == selectedYouTubeMode)
                     }
                 }
             } label: {
@@ -598,22 +618,24 @@ struct ImageGeneratorView: View {
                         title: "Основная фотография",
                         subtitle: mainPhoto == nil ? "Товар, услуга или человек" : "Фотография добавлена",
                         image: mainPhoto?.image,
-                        systemImage: "photo"
+                        systemImage: "photo",
+                        isLoading: isLoadingMainPhoto
                     )
                 }
                 .buttonStyle(.plain)
-                .disabled(isGenerating || isLoadingReferences)
+                .disabled(isGenerating || isLoadingReferences || isLoadingMainPhoto)
 
                 PhotosPicker(selection: $logoItem, matching: .images) {
                     uploadSlot(
                         title: "Логотип",
                         subtitle: logoImage == nil ? "Разместим аккуратно в макете" : "Логотип добавлен",
                         image: logoImage?.image,
-                        systemImage: "seal"
+                        systemImage: "seal",
+                        isLoading: isLoadingLogo
                     )
                 }
                 .buttonStyle(.plain)
-                .disabled(isGenerating || isLoadingReferences)
+                .disabled(isGenerating || isLoadingReferences || isLoadingLogo)
 
                 PhotosPicker(selection: $referenceItems, maxSelectionCount: 4, matching: .images) {
                     uploadSlot(
@@ -635,11 +657,12 @@ struct ImageGeneratorView: View {
                         title: "Фото героя",
                         subtitle: mainPhoto == nil ? "Лицо или главный персонаж ролика" : "Фото героя добавлено",
                         image: mainPhoto?.image,
-                        systemImage: "person.crop.rectangle"
+                        systemImage: "person.crop.rectangle",
+                        isLoading: isLoadingMainPhoto
                     )
                 }
                 .buttonStyle(.plain)
-                .disabled(isGenerating || isLoadingReferences)
+                .disabled(isGenerating || isLoadingReferences || isLoadingMainPhoto)
 
                 PhotosPicker(selection: $referenceItems, maxSelectionCount: 4, matching: .images) {
                     uploadSlot(
@@ -711,6 +734,14 @@ struct ImageGeneratorView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.white.opacity(0.54))
             }
+
+            // Ошибку фото показываем прямо под слотами, а не молча.
+            if let photoLoadError {
+                Label(photoLoadError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(14)
         .x5ClearGlass(cornerRadius: 18, highlight: 0.10)
@@ -720,7 +751,8 @@ struct ImageGeneratorView: View {
         title: String,
         subtitle: String,
         image: UIImage?,
-        systemImage: String
+        systemImage: String,
+        isLoading: Bool = false
     ) -> some View {
         HStack(spacing: 12) {
             if let image {
@@ -742,15 +774,22 @@ struct ImageGeneratorView: View {
                 Text(title)
                     .font(.system(size: 14, weight: .heavy))
                     .foregroundColor(.white)
-                Text(subtitle)
+                Text(isLoading ? "Загружаем фото…" : subtitle)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.white.opacity(0.54))
                     .lineLimit(1)
             }
             Spacer()
-            Image(systemName: image == nil ? "plus.circle.fill" : "checkmark.circle.fill")
-                .font(.system(size: 20, weight: .bold))
-                .foregroundColor(image == nil ? .white.opacity(0.56) : X5Style.blue)
+            if isLoading {
+                // Видно, что фото принято и грузится (из iCloud это бывает долго).
+                ProgressView()
+                    .tint(.white)
+                    .frame(width: 20, height: 20)
+            } else {
+                Image(systemName: image == nil ? "plus.circle.fill" : "checkmark.circle.fill")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(image == nil ? .white.opacity(0.56) : X5Style.blue)
+            }
         }
         .padding(10)
         .background(Color.white.opacity(0.07))
@@ -1354,7 +1393,10 @@ struct ImageGeneratorView: View {
         )
         guard plan.needsWork else { return }
 
-        if !plan.needsDecoding.isEmpty { isLoadingReferences = true }
+        if !plan.needsDecoding.isEmpty {
+            isLoadingReferences = true
+            photoLoadError = nil
+        }
         defer { isLoadingReferences = false }
 
         var loaded: [ImageReferenceAsset] = []
@@ -1369,20 +1411,59 @@ struct ImageGeneratorView: View {
         referenceImages = loaded
     }
 
-    private func loadReferenceImage(_ item: PhotosPickerItem?) async -> ImageReferenceAsset? {
-        guard let item,
-              let data = try? await item.loadTransferable(type: Data.self),
-              let uiImage = UIImage(data: data),
-              let encoded = Self.uploadPayload(for: uiImage)
-        else { return nil }
-        return ImageReferenceAsset(
-            id: Self.referenceIdentity(item),
-            image: uiImage,
-            reference: ImageGenerationReference(
-                mimeType: "image/jpeg",
-                base64: encoded.base64EncodedString()
+    private func loadReferenceImage(_ item: PhotosPickerItem) async -> ImageReferenceAsset? {
+        // Общий загрузчик с CourseUP: Data → запасной путь через файл, ужатие
+        // до 1536 px вне главного потока, HEIC/PNG → JPEG. Ошибку не глотаем.
+        do {
+            let prepared = try await PickedPhotoLoader.loadPrepared(from: item, maxPixelSize: 1536)
+            return ImageReferenceAsset(
+                id: Self.referenceIdentity(item),
+                image: prepared.preview,
+                reference: ImageGenerationReference(
+                    mimeType: "image/jpeg",
+                    base64: prepared.jpeg.base64EncodedString()
+                )
             )
-        )
+        } catch {
+            photoLoadError = PickedPhotoLoader.errorText
+            return nil
+        }
+    }
+
+    private enum SinglePhotoSlot {
+        case main
+        case logo
+    }
+
+    /// «Фото героя» / «Основная фотография» / логотип.
+    private func loadSinglePhoto(_ item: PhotosPickerItem, slot: SinglePhotoSlot) async {
+        photoLoadError = nil
+        switch slot {
+        case .main: isLoadingMainPhoto = true
+        case .logo: isLoadingLogo = true
+        }
+        let asset = await loadReferenceImage(item)
+
+        // Пока грузилось, могли выбрать другое фото — старый результат не ставим.
+        let isStillCurrent: Bool
+        switch slot {
+        case .main: isStillCurrent = mainPhotoItem == item
+        case .logo: isStillCurrent = logoItem == item
+        }
+        guard isStillCurrent else { return }
+
+        switch slot {
+        case .main:
+            if let asset { mainPhoto = asset }
+            isLoadingMainPhoto = false
+            // Сброс выбора: иначе то же фото второй раз не выбрать —
+            // onChange не срабатывает на одинаковое значение.
+            mainPhotoItem = nil
+        case .logo:
+            if let asset { logoImage = asset }
+            isLoadingLogo = false
+            logoItem = nil
+        }
     }
 
     /// A photo straight out of the camera roll is 4000 px wide and several

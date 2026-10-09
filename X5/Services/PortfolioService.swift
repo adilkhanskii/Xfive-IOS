@@ -34,6 +34,11 @@ struct PortfolioItem: Codable, Identifiable, Equatable {
     var displayMediaUrl: String? { signedMediaUrl }
     var displayThumbnailUrl: String? { signedThumbnailUrl ?? signedMediaUrl }
 
+    /// У видео есть обложка (новое превью «…-cover.jpg»), а не только сетка кадров.
+    var hasVideoCover: Bool {
+        type == "video" && (thumbnailUrl?.hasSuffix(PortfolioMediaPolicy.videoCoverSuffix) ?? false)
+    }
+
     var moderationStatus: String {
         moderationStatusRaw ?? "approved"
     }
@@ -54,6 +59,10 @@ struct PortfolioItem: Codable, Identifiable, Equatable {
 
 enum PortfolioMediaPolicy {
     static let bucket = "portfolio"
+    /// Превью видео с обложкой: «…-cover.jpg» = сверху обложка 3:4, снизу сетка
+    /// кадров для автопроверки (одна картинка в существующей колонке thumbnail_url,
+    /// без миграции). Старые превью без суффикса — только сетка кадров.
+    static let videoCoverSuffix = "-cover.jpg"
     static let canonicalPublicPathPrefix = "/storage/v1/object/public/\(bucket)/"
     static let canonicalPrivatePathPrefix = "/storage/v1/object/\(bucket)/"
 
@@ -129,21 +138,25 @@ struct PortfolioAuthor: Codable, Equatable {
     let nickname: String?
 }
 
+/// Строка `public.portfolio_comments` — таблица, которая реально есть в проде
+/// (её создавал сайт, mig_portfolio.mjs; RLS: читать всем, писать/удалять своё).
+/// Зачем: iOS ходил в `portfolio_item_comments`, которой в проде НЕТ (см.
+/// docs/MIGRATION-HISTORY-2026-10-02.md) → комментарии молча не работали.
+/// Имени и аватара в таблице нет — подставляем из `profiles` после загрузки,
+/// поэтому email автора больше нигде не хранится и не показывается.
 struct PortfolioComment: Codable, Identifiable, Equatable {
     let id: String
     let itemId: String
     let userId: String
-    let userName: String?
-    let userAvatar: String?
+    var userName: String? = nil
+    var userAvatar: String? = nil
     let text: String
     let createdAt: String?
 
     enum CodingKeys: String, CodingKey {
         case id, text
-        case itemId = "item_id"
+        case itemId = "portfolio_id"
         case userId = "user_id"
-        case userName = "user_name"
-        case userAvatar = "user_avatar"
         case createdAt = "created_at"
     }
 }
@@ -365,7 +378,7 @@ final class PortfolioService: ObservableObject {
     }
 
     /// Uploads image/video and stores stable object IDs, never expiring URLs.
-    func addMedia(data: Data, type: String, mime: String, ext: String, thumbnailData: Data? = nil, userId: String, title: String?, description: String?, accessToken: String) async -> Bool {
+    func addMedia(data: Data, type: String, mime: String, ext: String, thumbnailData: Data? = nil, thumbnailHasCover: Bool = false, userId: String, title: String?, description: String?, accessToken: String) async -> Bool {
         let cleanType = type == "video" ? "video" : "image"
         let safeExt = ext.isEmpty ? (cleanType == "video" ? "mov" : "jpg") : ext
         let identifier = "\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.lowercased())"
@@ -382,9 +395,11 @@ final class PortfolioService: ObservableObject {
 
         var thumbnailURL: String?
         if cleanType == "video", let thumbnailData {
+            // Суффикс говорит экрану, что сверху превью — обложка (см. videoCoverSuffix).
+            let thumbnailName = identifier + (thumbnailHasCover ? PortfolioMediaPolicy.videoCoverSuffix : ".jpg")
             thumbnailURL = await uploadPortfolioMedia(
                 data: thumbnailData,
-                path: "\(userId)/thumbnails/\(identifier).jpg",
+                path: "\(userId)/thumbnails/\(thumbnailName)",
                 mime: "image/jpeg",
                 accessToken: accessToken
             )
@@ -636,10 +651,10 @@ final class PortfolioService: ObservableObject {
     }
 
     func loadComments(itemId: String, accessToken: String) async -> [PortfolioComment] {
-        guard var components = URLComponents(url: baseURL.appendingPathComponent("rest/v1/portfolio_item_comments"), resolvingAgainstBaseURL: false) else { return [] }
+        guard var components = URLComponents(url: baseURL.appendingPathComponent("rest/v1/portfolio_comments"), resolvingAgainstBaseURL: false) else { return [] }
         components.queryItems = [
-            URLQueryItem(name: "item_id", value: "eq.\(itemId)"),
-            URLQueryItem(name: "select", value: "*"),
+            URLQueryItem(name: "portfolio_id", value: "eq.\(itemId)"),
+            URLQueryItem(name: "select", value: "id,portfolio_id,user_id,text,created_at"),
             URLQueryItem(name: "order", value: "created_at.asc")
         ]
         guard let reqURL = components.url else { return [] }
@@ -650,30 +665,82 @@ final class PortfolioService: ObservableObject {
               let http = response as? HTTPURLResponse,
               (200..<300).contains(http.statusCode)
         else { return [] }
-        return (try? JSONDecoder().decode([PortfolioComment].self, from: data)) ?? []
+        let rows = (try? JSONDecoder().decode([PortfolioComment].self, from: data)) ?? []
+        return await attachCommentAuthors(rows, accessToken: accessToken)
     }
 
+    /// Имя и аватар автора комментария — из `profiles` (ник или имя, не email).
+    private func attachCommentAuthors(_ comments: [PortfolioComment], accessToken: String) async -> [PortfolioComment] {
+        let userIDs = Set(comments.map(\.userId))
+        guard !userIDs.isEmpty,
+              var components = URLComponents(
+                url: baseURL.appendingPathComponent("rest/v1/profiles"),
+                resolvingAgainstBaseURL: false
+              )
+        else { return comments }
+        components.queryItems = [
+            URLQueryItem(name: "id", value: "in.(\(userIDs.joined(separator: ",")))"),
+            URLQueryItem(name: "select", value: "id,name,avatar,nickname")
+        ]
+        guard let url = components.url else { return comments }
+        var request = URLRequest(url: url)
+        request.setValue(anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        guard let (data, response) = try? await session.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode),
+              let rows = try? JSONDecoder().decode([PortfolioAuthor].self, from: data)
+        else { return comments }
+        let byID = Dictionary(rows.map { ($0.id.lowercased(), $0) }, uniquingKeysWith: { first, _ in first })
+        return comments.map { comment in
+            var named = comment
+            if let author = byID[comment.userId.lowercased()] {
+                named.userName = Self.publicName(of: author)
+                named.userAvatar = author.avatar
+            }
+            return named
+        }
+    }
+
+    private static func publicName(of author: PortfolioAuthor) -> String? {
+        if let nickname = author.nickname?.trimmingCharacters(in: .whitespacesAndNewlines), !nickname.isEmpty {
+            return nickname
+        }
+        if let name = author.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+            return name
+        }
+        return nil
+    }
+
+    /// `userName`/`userAvatar` только для показа своего нового комментария сразу —
+    /// на сервер они не уходят (в `portfolio_comments` таких колонок нет).
     func addComment(itemId: String, userId: String, userName: String?, userAvatar: String?, text: String, accessToken: String) async -> PortfolioComment? {
-        var request = URLRequest(url: baseURL.appendingPathComponent("rest/v1/portfolio_item_comments"))
+        var request = URLRequest(url: baseURL.appendingPathComponent("rest/v1/portfolio_comments"))
         request.httpMethod = "POST"
         request.setValue(anonKey, forHTTPHeaderField: "apikey")
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("return=representation", forHTTPHeaderField: "Prefer")
         let body: [String: AnyEncodable] = [
-            "item_id": AnyEncodable(itemId),
+            "portfolio_id": AnyEncodable(itemId),
             "user_id": AnyEncodable(userId),
-            "user_name": AnyEncodable(userName ?? ""),
-            "user_avatar": AnyEncodable(userAvatar ?? ""),
-            "text": AnyEncodable(text)
+            // Сайт режет комментарий до 1000 символов — держим так же.
+            "text": AnyEncodable(String(text.prefix(1000)))
         ]
         request.httpBody = try? JSONEncoder().encode(body)
         guard let (data, response) = try? await session.data(for: request),
               let http = response as? HTTPURLResponse,
               (200..<300).contains(http.statusCode),
-              let rows = try? JSONDecoder().decode([PortfolioComment].self, from: data)
+              let rows = try? JSONDecoder().decode([PortfolioComment].self, from: data),
+              var created = rows.first
         else { return nil }
-        return rows.first
+        created.userName = userName
+        created.userAvatar = userAvatar
+        if userName == nil {
+            // Имя автора берём из профиля, как у остальных комментариев.
+            return (await attachCommentAuthors([created], accessToken: accessToken)).first ?? created
+        }
+        return created
     }
 
     func delete(itemId: String, accessToken: String) async {
@@ -690,10 +757,51 @@ final class PortfolioService: ObservableObject {
         }
     }
 
-    func updateDetails(itemId: String, title: String?, description: String?, accessToken: String) async -> PortfolioItem? {
+    /// Текущее превью кейса (для смены обложки видео: из него берём сетку кадров).
+    func thumbnailData(for item: PortfolioItem, accessToken: String) async -> Data? {
+        guard let canonical = item.thumbnailUrl, !canonical.isEmpty,
+              let url = await signedPortfolioMediaURL(
+                canonicalURL: canonical,
+                accessToken: accessToken,
+                forceRefresh: true
+              ),
+              let (data, response) = try? await session.data(from: url),
+              let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode),
+              !data.isEmpty
+        else { return nil }
+        return data
+    }
+
+    /// `newVideoThumbnail` — новое превью «обложка + кадры» (смена обложки видео).
+    /// Загружается новым файлом (бакет неизменяемый), затем thumbnail_url меняется
+    /// вместе с текстом; сервер сам переводит кейс на повторную автопроверку.
+    func updateDetails(
+        itemId: String,
+        title: String?,
+        description: String?,
+        newVideoThumbnail: Data? = nil,
+        ownerId: String? = nil,
+        accessToken: String
+    ) async -> PortfolioItem? {
         guard var components = URLComponents(url: baseURL.appendingPathComponent("rest/v1/portfolio_items"), resolvingAgainstBaseURL: false) else { return nil }
         components.queryItems = [URLQueryItem(name: "id", value: "eq.\(itemId)")]
         guard let reqURL = components.url else { return nil }
+
+        var newThumbnailURL: String?
+        if let newVideoThumbnail, let ownerId {
+            let identifier = "\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.lowercased())"
+            guard let uploaded = await uploadPortfolioMedia(
+                data: newVideoThumbnail,
+                path: "\(ownerId)/thumbnails/\(identifier)\(PortfolioMediaPolicy.videoCoverSuffix)",
+                mime: "image/jpeg",
+                accessToken: accessToken
+            ) else {
+                self.error = "Upload failed"
+                return nil
+            }
+            newThumbnailURL = uploaded
+        }
 
         var request = URLRequest(url: reqURL)
         request.httpMethod = "PATCH"
@@ -701,10 +809,14 @@ final class PortfolioService: ObservableObject {
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("return=representation", forHTTPHeaderField: "Prefer")
-        request.httpBody = try? JSONEncoder().encode([
+        var body: [String: AnyEncodable] = [
             "title": AnyEncodable(title ?? ""),
             "description": AnyEncodable(description ?? "")
-        ])
+        ]
+        if let newThumbnailURL {
+            body["thumbnail_url"] = AnyEncodable(newThumbnailURL)
+        }
+        request.httpBody = try? JSONEncoder().encode(body)
 
         guard let (data, response) = try? await session.data(for: request),
               let http = response as? HTTPURLResponse,
@@ -737,12 +849,16 @@ final class PortfolioService: ObservableObject {
         return await resolveMediaURLs(in: [updated], accessToken: accessToken).first ?? updated
     }
 
+    // Лайки — `public.portfolio_likes` (portfolio_id text, user_id, UNIQUE пара),
+    // таблица, которая реально есть в проде. Раньше iOS ходил в несуществующую
+    // `portfolio_item_likes` → сердечко никогда не сохранялось (Адильхан 09.10).
+    // идея: сайт сейчас тоже пишет в portfolio_item_* — перевести его сюда же.
     func likeState(itemId: String, currentUserId: String, accessToken: String) async -> PortfolioLikeState {
-        guard var components = URLComponents(url: baseURL.appendingPathComponent("rest/v1/portfolio_item_likes"), resolvingAgainstBaseURL: false) else {
+        guard var components = URLComponents(url: baseURL.appendingPathComponent("rest/v1/portfolio_likes"), resolvingAgainstBaseURL: false) else {
             return PortfolioLikeState(isLiked: false, count: 0)
         }
         components.queryItems = [
-            URLQueryItem(name: "item_id", value: "eq.\(itemId)"),
+            URLQueryItem(name: "portfolio_id", value: "eq.\(itemId)"),
             URLQueryItem(name: "select", value: "user_id")
         ]
         guard let reqURL = components.url else {
@@ -760,34 +876,41 @@ final class PortfolioService: ObservableObject {
             return PortfolioLikeState(isLiked: false, count: 0)
         }
         return PortfolioLikeState(
-            isLiked: rows.contains { $0.userId == currentUserId },
+            isLiked: rows.contains { $0.userId.lowercased() == currentUserId.lowercased() },
             count: rows.count
         )
     }
 
     func setLiked(itemId: String, liked: Bool, currentUserId: String, accessToken: String) async -> Bool {
         if liked {
-            var request = URLRequest(url: baseURL.appendingPathComponent("rest/v1/portfolio_item_likes"))
+            // on_conflict по UNIQUE (portfolio_id, user_id): повторный лайк не падает.
+            guard var components = URLComponents(url: baseURL.appendingPathComponent("rest/v1/portfolio_likes"), resolvingAgainstBaseURL: false) else {
+                return false
+            }
+            components.queryItems = [URLQueryItem(name: "on_conflict", value: "portfolio_id,user_id")]
+            guard let reqURL = components.url else { return false }
+            var request = URLRequest(url: reqURL)
             request.httpMethod = "POST"
             request.setValue(anonKey, forHTTPHeaderField: "apikey")
             request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue("resolution=ignore-duplicates", forHTTPHeaderField: "Prefer")
+            request.setValue("resolution=ignore-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
             let body: [String: AnyEncodable] = [
-                "item_id": AnyEncodable(itemId),
+                "portfolio_id": AnyEncodable(itemId),
                 "user_id": AnyEncodable(currentUserId)
             ]
             request.httpBody = try? JSONEncoder().encode(body)
             guard let (_, response) = try? await session.data(for: request),
                   let http = response as? HTTPURLResponse
             else { return false }
-            return (200..<300).contains(http.statusCode)
+            // 409 — лайк уже стоит (например, поставлен с сайта): это успех.
+            return (200..<300).contains(http.statusCode) || http.statusCode == 409
         } else {
-            guard var components = URLComponents(url: baseURL.appendingPathComponent("rest/v1/portfolio_item_likes"), resolvingAgainstBaseURL: false) else {
+            guard var components = URLComponents(url: baseURL.appendingPathComponent("rest/v1/portfolio_likes"), resolvingAgainstBaseURL: false) else {
                 return false
             }
             components.queryItems = [
-                URLQueryItem(name: "item_id", value: "eq.\(itemId)"),
+                URLQueryItem(name: "portfolio_id", value: "eq.\(itemId)"),
                 URLQueryItem(name: "user_id", value: "eq.\(currentUserId)")
             ]
             guard let reqURL = components.url else { return false }

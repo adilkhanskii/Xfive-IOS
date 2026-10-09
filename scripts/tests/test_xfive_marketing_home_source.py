@@ -107,7 +107,10 @@ class XFiveMarketingHomeSourceTests(unittest.TestCase):
     def test_home_no_longer_contains_the_fake_in_development_sheet(self):
         home = HOME.read_text(encoding="utf-8")
         self.assertNotIn("private struct HomeFeatureInDevelopmentView", home)
-        self.assertIn('Text("Все AI-инструменты")', home)
+        # 09.10 (Адильхан): карточку «Все AI-инструменты» убрали с главной,
+        # сам хаб остаётся доступен через поиск.
+        self.assertNotIn('Text("Все AI-инструменты")', home)
+        self.assertNotIn("aiStudioLauncher", home)
         self.assertIn("AIStudioHubView()", home)
 
     def test_home_keeps_image_interfaces_visible_and_gates_provider_execution(self):
@@ -133,9 +136,10 @@ class XFiveMarketingHomeSourceTests(unittest.TestCase):
             "Со знаменитостью",
             "Обложки YouTube",
             "AI-инфлюенсер",
-            "Карточки товара",
         ):
             self.assertIn(text, home)
+        # 09.10: маленькая плитка «Карточки товара» дублировала большую — убрана.
+        self.assertNotIn('title: "Карточки товара"', home)
 
         self.assertIn("ScrollView(.horizontal, showsIndicators: false)", home)
         self.assertIn("LazyHStack", home)
@@ -162,7 +166,7 @@ class XFiveMarketingHomeSourceTests(unittest.TestCase):
         self.assertLess(home.index("trendsSection"), home.index("businessSection"))
         self.assertTrue(artwork.exists(), "The AI feature must keep its content artwork")
 
-    def test_sales_banner_is_native_and_opens_the_target_ad_tool(self):
+    def test_sales_banner_is_native_and_opens_the_product_cards_tool(self):
         home = HOME.read_text(encoding="utf-8")
 
         self.assertIn("struct NativeHomeSalesBannerCard", home)
@@ -178,7 +182,7 @@ class XFiveMarketingHomeSourceTests(unittest.TestCase):
         self.assertNotIn('Image("HomeSalesBannerFeature")', home)
         self.assertNotIn("salesLabel(", home)
         self.assertIn('Text("Карточки\\nтоваров")', home)
-        self.assertIn('handle(imageAction("target_ad"))', home)
+        self.assertIn('handle(imageAction("product_cards"))', home)
 
     def test_sales_banner_is_immediately_after_ai_influencer_before_tiles(self):
         home = HOME.read_text(encoding="utf-8")
@@ -188,7 +192,8 @@ class XFiveMarketingHomeSourceTests(unittest.TestCase):
 
         influencer = business.index("NativeHomeAIInfluencerFeatureCard(")
         banner = business.index("NativeHomeSalesBannerCard(")
-        tiles = business.index("LazyVGrid(")
+        # 09.10: сетки больше нет — одна плитка «Обложки YouTube» во всю ширину.
+        tiles = business.index("ForEach(businessItems)")
         self.assertLess(influencer, banner)
         self.assertLess(banner, tiles)
 

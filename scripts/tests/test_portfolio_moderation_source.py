@@ -314,18 +314,55 @@ class PortfolioModerationSourceTests(unittest.TestCase):
     def test_pending_or_rejected_media_cannot_be_shared(self):
         view = PORTFOLIO_VIEW.read_text(encoding="utf-8")
 
-        self.assertGreaterEqual(
-            view.count('if item.moderationStatus == "approved" {'),
-            2,
-        )
+        # 09.10: старый неиспользуемый PortfolioPostViewer удалён — остался один
+        # экран поста, и «Поделиться» в нём по-прежнему только для approved.
+        action_row = view.split("private var actionRow", 1)[1].split("private var captionBlock", 1)[0]
+        gate = action_row.index('if item.moderationStatus == "approved" {')
+        self.assertLess(gate, action_row.index("await prepareShare()"))
 
-    def test_owner_sees_that_automatic_moderation_completed(self):
+    def test_owner_sees_badge_only_while_moderation_is_pending_or_rejected(self):
+        # 09.10 (Адильхан): зелёная плашка «Автопроверка пройдена» лишняя —
+        # плашку видно, только пока кейс ждёт проверку или отклонён.
         service = PORTFOLIO_SERVICE.read_text(encoding="utf-8")
         view = PORTFOLIO_VIEW.read_text(encoding="utf-8")
 
         self.assertIn('default: return "Автопроверка пройдена"', service)
-        self.assertIn("if canEdit || item.needsModerationBadge", view)
-        self.assertIn("PortfolioModerationBadge(item: item)", view)
+        self.assertNotIn("if canEdit || item.needsModerationBadge", view)
+        caption = view.split("private var captionBlock", 1)[1].split("private var commentsView", 1)[0]
+        self.assertIn("if item.needsModerationBadge {", caption)
+        self.assertIn("PortfolioModerationBadge(item: item)", caption)
+
+    def test_post_has_no_fake_video_editor_and_working_social_actions(self):
+        # 09.10: «Монтаж видео» нигде не был реализован — убран. Лайки и
+        # комментарии ходят в те же таблицы, что сайт (portfolio_likes /
+        # portfolio_comments): portfolio_item_* в проде не существует.
+        service = PORTFOLIO_SERVICE.read_text(encoding="utf-8")
+        view = PORTFOLIO_VIEW.read_text(encoding="utf-8")
+
+        self.assertNotIn("showVideoEditorNotice", view)
+        self.assertNotIn("Открыть монтаж видео", view)
+        self.assertNotIn('Label("Монтаж видео"', view)
+        self.assertNotIn("localLikedComments", view)
+        self.assertNotIn("rest/v1/portfolio_item_likes", service)
+        self.assertNotIn("rest/v1/portfolio_item_comments", service)
+        self.assertIn('appendingPathComponent("rest/v1/portfolio_likes")', service)
+        self.assertIn('appendingPathComponent("rest/v1/portfolio_comments")', service)
+        self.assertIn('case itemId = "portfolio_id"', service)
+        self.assertNotIn("userName: auth.userEmail", view)
+        self.assertIn("commentFieldFocused = true", view)
+        self.assertNotIn('ShareLink(item: item.displayMediaUrl', view)
+        self.assertIn("URLSession.shared.download(from: remoteURL)", view)
+
+    def test_video_tiles_show_one_play_icon_and_a_cover(self):
+        view = PORTFOLIO_VIEW.read_text(encoding="utf-8")
+        service = PORTFOLIO_SERVICE.read_text(encoding="utf-8")
+        cell = view.split("private struct PortfolioGridCell", 1)[1].split("private var imageURLString", 1)[0]
+
+        self.assertEqual(cell.count('Image(systemName: "play'), 1)
+        self.assertIn("PortfolioVideoTileCover(item: item)", cell)
+        self.assertIn('static let videoCoverSuffix = "-cover.jpg"', service)
+        self.assertIn("thumbnailHasCover: thumbnailHasCover", view)
+        self.assertIn("PortfolioVideoCover.compose(cover:", view)
 
 
 if __name__ == "__main__":

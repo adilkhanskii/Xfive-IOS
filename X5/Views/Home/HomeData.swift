@@ -69,14 +69,6 @@ enum ImageGenerationProvider: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
-    var menuSystemImage: String {
-        switch self {
-        case .gptImage2: return "sparkles"
-        case .nanoBanana2: return "g.circle.fill"
-        case .nanoBanana2Lite: return "g.circle.fill"
-        }
-    }
-
     var brandLabel: String {
         switch self {
         case .gptImage2: return "GPT"

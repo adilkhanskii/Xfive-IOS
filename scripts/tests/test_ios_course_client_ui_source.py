@@ -96,7 +96,37 @@ class IOSCourseClientUISourceTests(unittest.TestCase):
         )
         self.assertNotIn("UIImage(data: data)", editor.split("struct LessonEditorSheet")[0])
         self.assertNotIn("let img = UIImage(data:", editor)
-        self.assertGreaterEqual(editor.count("CourseCoverImage.prepare("), 3)
+        # 09.10: обложка курса и урока грузятся общим PickedPhotoLoader, который
+        # сам ужимает фото через CourseCoverImage.prepare.
+        loader = (ROOT / "X5" / "Views" / "Helpers" / "PickedPhotoLoader.swift").read_text(
+            encoding="utf-8"
+        )
+        self.assertGreaterEqual(editor.count("CourseCoverImage.prepare("), 1)
+        self.assertGreaterEqual(editor.count("PickedPhotoLoader.loadPrepared(from: item)"), 2)
+        self.assertIn("CourseCoverImage.prepare(data, maxPixelSize: maxPixelSize)", loader)
+
+    def test_picked_photos_never_fail_silently_and_can_be_picked_again(self):
+        # 09.10 (Адильхан): «выбрал фото → Загрузка... → не прикрепилось» в
+        # генераторе обложек и в CourseUP. Ошибка видна, выбор сбрасывается.
+        editor = (ROOT / "X5" / "Views" / "CourseEditorView.swift").read_text(
+            encoding="utf-8"
+        )
+        generator = (ROOT / "X5" / "Views" / "Home" / "ImageGeneratorView.swift").read_text(
+            encoding="utf-8"
+        )
+        loader = (ROOT / "X5" / "Views" / "Helpers" / "PickedPhotoLoader.swift").read_text(
+            encoding="utf-8"
+        )
+        for source in (editor, generator):
+            self.assertNotIn("try? await item.loadTransferable(type: Data.self)", source)
+        self.assertIn("loadTransferable(type: PickedImageFile.self)", loader)
+        self.assertIn("FileRepresentation(contentType: .image)", loader)
+        self.assertIn("coverPickError = PickedPhotoLoader.errorText", editor)
+        self.assertIn("if coverItem == item { coverItem = nil }", editor)
+        self.assertIn("if thumbnailItem == item { thumbnailItem = nil }", editor)
+        self.assertIn("photoLoadError = PickedPhotoLoader.errorText", generator)
+        self.assertIn("mainPhotoItem = nil", generator)
+        self.assertIn("isLoading: isLoadingMainPhoto", generator)
 
     def test_courseup_header_and_every_real_course_have_developer_editor_action(self):
         courses = (ROOT / "X5" / "Views" / "CoursesView.swift").read_text(

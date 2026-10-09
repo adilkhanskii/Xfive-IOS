@@ -93,7 +93,7 @@ struct PortfolioGrid: View {
             }
         }
         .sheet(isPresented: $showingAdd) {
-            AddPortfolioItemView { data, mediaType, mime, ext, thumbnailData, title, desc in
+            AddPortfolioItemView { data, mediaType, mime, ext, thumbnailData, thumbnailHasCover, title, desc in
                 guard let token = await auth.freshAccessToken() else { return false }
                 return await service.addMedia(
                     data: data,
@@ -101,6 +101,7 @@ struct PortfolioGrid: View {
                     mime: mime,
                     ext: ext,
                     thumbnailData: thumbnailData,
+                    thumbnailHasCover: thumbnailHasCover,
                     userId: userId,
                     title: title,
                     description: desc,
@@ -126,9 +127,29 @@ struct PortfolioGrid: View {
                     PortfolioPinnedStore.toggle(item.id)
                     pinnedTick += 1
                 },
-                onUpdateDetails: { item, title, description in
+                onUpdateDetails: { item, title, description, newCover in
                     guard let token = await auth.freshAccessToken() else { return nil }
-                    return await service.updateDetails(itemId: item.id, title: title, description: description, accessToken: token)
+                    var newThumbnail: Data?
+                    if let newCover {
+                        // Новая обложка + кадры из текущего превью: автопроверка
+                        // по-прежнему видит кадры самого видео, а не только обложку.
+                        guard let current = await service.thumbnailData(for: item, accessToken: token),
+                              let composed = PortfolioVideoCover.recompose(
+                                cover: newCover,
+                                currentThumbnail: current,
+                                currentHasCover: item.hasVideoCover
+                              )
+                        else { return nil }
+                        newThumbnail = composed
+                    }
+                    return await service.updateDetails(
+                        itemId: item.id,
+                        title: title,
+                        description: description,
+                        newVideoThumbnail: newThumbnail,
+                        ownerId: item.userId,
+                        accessToken: token
+                    )
                 },
                 isPinned: { item in
                     PortfolioPinnedStore.isPinned(item.id)
@@ -171,9 +192,11 @@ struct PortfolioGrid: View {
                     guard let uid = auth.userId,
                           let token = await auth.freshAccessToken()
                     else { return nil }
+                    // Раньше сюда шёл email — он показывался всем под комментарием.
+                    // Теперь имя/ник подставляет сервис из profiles.
                     return await service.addComment(itemId: item.id,
                                                     userId: uid,
-                                                    userName: auth.userEmail,
+                                                    userName: nil,
                                                     userAvatar: nil,
                                                     text: text,
                                                     accessToken: token)
@@ -222,10 +245,13 @@ private struct PortfolioGridCell: View {
                 Color.white.opacity(0.055)
 
                 if item.type == "video" {
-                    Color.black.opacity(0.42)
+                    // Раньше плитка видео была чёрной: превью видео — это сетка
+                    // кадров для автопроверки, её не показывали. Теперь — обложка.
+                    PortfolioVideoTileCover(item: item)
                     Image(systemName: "play.circle.fill")
                         .font(.system(size: 30, weight: .semibold))
                         .foregroundColor(.white.opacity(0.92))
+                        .shadow(color: .black.opacity(0.45), radius: 6)
                 } else if let s = imageURLString, let url = URL(string: s) {
                     CachedAsyncImage(url: url) { image in
                         image.resizable().scaledToFill()
@@ -258,14 +284,8 @@ private struct PortfolioGridCell: View {
                                 .clipShape(Circle())
                         }
                         Spacer()
-                        if item.type == "video" {
-                            Image(systemName: "play.fill")
-                                .font(.system(size: 12, weight: .black))
-                                .foregroundColor(.white)
-                                .padding(6)
-                                .background(.ultraThinMaterial)
-                                .clipShape(Circle())
-                        }
+                        // Второй значок ▶ в углу убран (Адильхан 09.10): хватает
+                        // одного большого по центру.
                     }
                     Spacer()
                     if let title = item.title, !title.isEmpty {
@@ -292,101 +312,135 @@ private struct PortfolioGridCell: View {
     }
 }
 
-private struct PortfolioFeedCard: View {
+// MARK: - Обложка видео
+
+/// Обложка видео в сетке портфолио.
+/// 1) Новое превью «…-cover.jpg»: сверху обложка 3:4, снизу кадры для автопроверки —
+///    показываем только верх (scaledToFill + выравнивание по верху, низ обрезается).
+/// 2) Старые видео: превью — только сетка кадров, как обложка не годится. Берём кадр
+///    прямо из видео на телефоне (AVAssetImageGenerator) и кэшируем на сессию.
+private struct PortfolioVideoTileCover: View {
     let item: PortfolioItem
-    let canEdit: Bool
-    let isPinned: Bool
-    let onOpen: () -> Void
-    let onDelete: () -> Void
-    let onTogglePin: () -> Void
+    @State private var videoFrame: UIImage?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Button(action: onOpen) {
-                ZStack {
-                    Color.white.opacity(0.06)
-                    if item.type == "video" {
-                        Color.black.opacity(0.55)
-                        Image(systemName: "play.circle.fill")
-                            .font(.system(size: 52, weight: .semibold))
-                            .foregroundColor(.white.opacity(0.9))
-                    } else if let s = item.displayMediaUrl, let url = URL(string: s) {
-                        CachedAsyncImage(url: url) { image in
-                            image.resizable().scaledToFill()
-                        } placeholder: {
-                            ProgressView().tint(.white.opacity(0.5))
-                        }
-                    }
+        ZStack {
+            Color.black.opacity(0.42)
+            if item.hasVideoCover, let s = item.signedThumbnailUrl, let url = URL(string: s) {
+                CachedAsyncImage(url: url) { image in
+                    image
+                        .resizable()
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                } placeholder: {
+                    Color.clear
                 }
-                .frame(maxWidth: .infinity)
-                .aspectRatio(4 / 5, contentMode: .fit)
-                .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(alignment: .topLeading) {
-                    if item.needsModerationBadge {
-                        PortfolioModerationBadge(item: item)
-                            .padding(10)
-                    } else if isPinned {
-                        Label("Закреп", systemImage: "pin.fill")
-                            .font(.system(size: 11, weight: .heavy))
-                            .foregroundColor(.black)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 6)
-                            .background(Color.accentColor)
-                            .clipShape(Capsule())
-                            .padding(10)
-                    }
-                }
-            }
-            .buttonStyle(.plain)
-
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 3) {
-                    if let title = item.title, !title.isEmpty {
-                        Text(title)
-                            .font(.system(size: 15, weight: .heavy))
-                            .foregroundColor(.white)
-                    }
-                    if let description = item.description, !description.isEmpty {
-                        Text(description)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.white.opacity(0.62))
-                            .lineLimit(2)
-                    }
-                    if item.type == "video" {
-                        Label("Открыть в видео-редакторе", systemImage: "wand.and.stars")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(.accentColor)
-                    }
-                }
-                Spacer()
-                if canEdit {
-                    Menu {
-                        Button {
-                            onTogglePin()
-                        } label: {
-                            Label(isPinned ? "Открепить" : "Закрепить", systemImage: isPinned ? "pin.slash" : "pin")
-                        }
-                        Button(role: .destructive) {
-                            onDelete()
-                        } label: {
-                            Label("Удалить", systemImage: "trash")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .font(.system(size: 22, weight: .semibold))
-                    }
-                    .foregroundColor(.white.opacity(0.82))
-                }
+            } else if let videoFrame {
+                Image(uiImage: videoFrame)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .padding(10)
-        .background(Color.white.opacity(0.045))
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        )
+        .task(id: item.id) {
+            guard !item.hasVideoCover, videoFrame == nil,
+                  let s = item.displayMediaUrl, let url = URL(string: s)
+            else { return }
+            videoFrame = await PortfolioVideoFrameCache.shared.frame(itemId: item.id, videoURL: url)
+        }
+    }
+}
+
+/// Кадр из видео для старых кейсов без обложки. Кэш живёт, пока открыто приложение.
+@MainActor
+private final class PortfolioVideoFrameCache {
+    static let shared = PortfolioVideoFrameCache()
+    private var frames: [String: UIImage] = [:]
+
+    func frame(itemId: String, videoURL: URL) async -> UIImage? {
+        if let cached = frames[itemId] { return cached }
+        let image = await Task.detached(priority: .utility) { () -> UIImage? in
+            let generator = AVAssetImageGenerator(asset: AVURLAsset(url: videoURL))
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = CGSize(width: 540, height: 540)
+            // Не самый первый кадр: он часто чёрный.
+            generator.requestedTimeToleranceAfter = CMTime(seconds: 1, preferredTimescale: 600)
+            let time = CMTime(seconds: 0.5, preferredTimescale: 600)
+            guard let cgImage = try? generator.copyCGImage(at: time, actualTime: nil) else { return nil }
+            return UIImage(cgImage: cgImage)
+        }.value
+        if let image { frames[itemId] = image }
+        return image
+    }
+}
+
+/// Склейка превью видео: обложка 3:4 сверху + сетка кадров снизу.
+/// Зачем одна картинка: автопроверка (moderate-portfolio) смотрит thumbnail_url —
+/// так она видит и обложку, и кадры видео; новая колонка и миграция не нужны.
+enum PortfolioVideoCover {
+    static let width: CGFloat = 1200
+    static var coverHeight: CGFloat { (width * 4 / 3).rounded() }
+
+    static func compose(cover: UIImage, frameSheet: UIImage?) -> Data? {
+        let sheetHeight: CGFloat
+        if let frameSheet, frameSheet.size.width > 0 {
+            sheetHeight = (frameSheet.size.height * width / frameSheet.size.width).rounded()
+        } else {
+            sheetHeight = 0
+        }
+        let size = CGSize(width: width, height: coverHeight + sheetHeight)
+        let format = UIGraphicsImageRendererFormat()
+        format.opaque = true
+        format.scale = 1
+        let rendered = UIGraphicsImageRenderer(size: size, format: format).image { context in
+            context.cgContext.setFillColor(UIColor.black.cgColor)
+            context.cgContext.fill(CGRect(origin: .zero, size: size))
+
+            let coverRect = CGRect(x: 0, y: 0, width: width, height: coverHeight)
+            let scale = max(
+                coverRect.width / max(cover.size.width, 1),
+                coverRect.height / max(cover.size.height, 1)
+            )
+            let drawSize = CGSize(width: cover.size.width * scale, height: cover.size.height * scale)
+            let drawRect = CGRect(
+                x: coverRect.midX - drawSize.width / 2,
+                y: coverRect.midY - drawSize.height / 2,
+                width: drawSize.width,
+                height: drawSize.height
+            )
+            context.cgContext.saveGState()
+            context.cgContext.clip(to: coverRect)
+            cover.draw(in: drawRect)
+            context.cgContext.restoreGState()
+
+            if let frameSheet, sheetHeight > 0 {
+                frameSheet.draw(in: CGRect(x: 0, y: coverHeight, width: width, height: sheetHeight))
+            }
+        }
+        return rendered.jpegData(compressionQuality: 0.8)
+    }
+
+    /// Смена обложки: кадры берём из текущего превью (у новых — низ склейки,
+    /// у старых — вся сетка кадров). Без кадров не склеиваем: иначе автопроверка
+    /// увидела бы только обложку, а не само видео.
+    static func recompose(cover: UIImage, currentThumbnail: Data, currentHasCover: Bool) -> Data? {
+        guard let current = UIImage(data: currentThumbnail) else { return nil }
+        let sheet: UIImage
+        if currentHasCover {
+            guard let cgImage = current.cgImage else { return nil }
+            let pixelWidth = CGFloat(cgImage.width)
+            let coverPixels = (pixelWidth * 4 / 3).rounded()
+            let remaining = CGFloat(cgImage.height) - coverPixels
+            guard remaining >= 1,
+                  let cropped = cgImage.cropping(
+                    to: CGRect(x: 0, y: coverPixels, width: pixelWidth, height: remaining)
+                  )
+            else { return nil }
+            sheet = UIImage(cgImage: cropped)
+        } else {
+            sheet = current
+        }
+        return compose(cover: cover, frameSheet: sheet)
     }
 }
 
@@ -427,96 +481,6 @@ private struct PortfolioModerationBadge: View {
     }
 }
 
-private struct PortfolioCell: View {
-    let item: PortfolioItem
-    let canEdit: Bool
-    let onDelete: () -> Void
-    let onLoadLike: () async -> PortfolioLikeState
-    let onSetLiked: (Bool) async -> Bool
-
-    @State private var confirmDelete = false
-    @State private var likeState = PortfolioLikeState(isLiked: false, count: 0)
-    @State private var likeBusy = false
-
-    var body: some View {
-        ZStack(alignment: .topTrailing) {
-            ZStack {
-                Color.white.opacity(0.06)
-                if item.type == "video" {
-                    Color.black.opacity(0.55)
-                    Image(systemName: "play.circle.fill")
-                        .font(.system(size: 34, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.88))
-                } else if let s = item.displayMediaUrl, let url = URL(string: s) {
-                    CachedAsyncImage(url: url) { image in
-                        image.resizable().scaledToFill()
-                    } placeholder: {
-                        ProgressView().tint(.white.opacity(0.5))
-                    }
-                }
-            }
-            .frame(height: 110)
-            .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-            if canEdit {
-                Button {
-                    confirmDelete = true
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 18))
-                        .foregroundColor(.white)
-                        .background(Circle().fill(Color.black.opacity(0.6)))
-                }
-                .padding(6)
-            } else {
-                Button {
-                    Task { await toggleLike() }
-                } label: {
-                    Label("\(likeState.count)", systemImage: likeState.isLiked ? "heart.fill" : "heart")
-                        .font(.system(size: 11, weight: .heavy))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 6)
-                        .background(Color.black.opacity(0.46))
-                        .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .disabled(likeBusy)
-                .padding(6)
-            }
-        }
-        .overlay(alignment: .bottomLeading) {
-            if canEdit {
-                PortfolioModerationBadge(item: item)
-                    .padding(6)
-            }
-        }
-        .task {
-            if !canEdit {
-                likeState = await onLoadLike()
-            }
-        }
-        .confirmationDialog("Удалить из портфолио?", isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("Удалить", role: .destructive) { onDelete() }
-            Button("Отмена", role: .cancel) {}
-        }
-    }
-
-    private func toggleLike() async {
-        guard !likeBusy else { return }
-        likeBusy = true
-        defer { likeBusy = false }
-        let next = !likeState.isLiked
-        let ok = await onSetLiked(next)
-        guard ok else { return }
-        likeState = PortfolioLikeState(
-            isLiked: next,
-            count: max(0, likeState.count + (next ? 1 : -1))
-        )
-    }
-}
-
 private struct PortfolioInstagramViewer: View {
     let items: [PortfolioItem]
     let initialIndex: Int
@@ -524,7 +488,8 @@ private struct PortfolioInstagramViewer: View {
     let authorForItem: (PortfolioItem) -> PortfolioAuthor?
     let onDelete: (PortfolioItem) -> Void
     let onTogglePin: (PortfolioItem) -> Void
-    let onUpdateDetails: (PortfolioItem, String?, String?) async -> PortfolioItem?
+    /// Последний параметр — новая обложка видео (nil — не меняли).
+    let onUpdateDetails: (PortfolioItem, String?, String?, UIImage?) async -> PortfolioItem?
     let isPinned: (PortfolioItem) -> Bool
     let onLoadLike: (PortfolioItem) async -> PortfolioLikeState
     let onSetLiked: (PortfolioItem, Bool) async -> Bool
@@ -548,7 +513,9 @@ private struct PortfolioInstagramViewer: View {
                                 isPinned: isPinned(item),
                                 onDelete: { onDelete(item) },
                                 onTogglePin: { onTogglePin(item) },
-                                onUpdateDetails: { title, description in await onUpdateDetails(item, title, description) },
+                                onUpdateDetails: { title, description, newCover in
+                                    await onUpdateDetails(item, title, description, newCover)
+                                },
                                 onLoadLike: { await onLoadLike(item) },
                                 onSetLiked: { liked in await onSetLiked(item, liked) },
                                 onLoadSaved: { await onLoadSaved(item) },
@@ -591,7 +558,7 @@ private struct PortfolioInstagramPostPage: View {
     let isPinned: Bool
     let onDelete: () -> Void
     let onTogglePin: () -> Void
-    let onUpdateDetails: (String?, String?) async -> PortfolioItem?
+    let onUpdateDetails: (String?, String?, UIImage?) async -> PortfolioItem?
     let onLoadLike: () async -> PortfolioLikeState
     let onSetLiked: (Bool) async -> Bool
     let onLoadSaved: () async -> PortfolioSaveState
@@ -608,9 +575,18 @@ private struct PortfolioInstagramPostPage: View {
     @State private var busySave = false
     @State private var confirmDelete = false
     @State private var showingEdit = false
-    @State private var showVideoEditorNotice = false
-    @State private var localLikedComments: Set<String> = []
+    // «Монтаж видео» и локальный «Лайк» комментария убраны (Адильхан 09.10:
+    // «лишнее убрать»): монтажа нет, а лайк комментария никуда не сохранялся.
     @State private var player: AVPlayer?
+    /// Тап по значку комментария ставит курсор в поле ввода.
+    @FocusState private var commentFieldFocused: Bool
+    /// Поделиться: ссылка на файл живёт 10 минут, поэтому делимся самим файлом.
+    @State private var shareFileURL: URL?
+    @State private var showingShare = false
+    @State private var preparingShare = false
+    @State private var shareError: String?
+    @State private var showAllComments = false
+    @State private var commentError: String?
 
     private var maxMediaHeight: CGFloat {
         let screen = UIScreen.main.bounds
@@ -648,6 +624,10 @@ private struct PortfolioInstagramPostPage: View {
         .onDisappear {
             player?.pause()
             player = nil
+            if let shareFileURL {
+                try? FileManager.default.removeItem(at: shareFileURL)
+            }
+            shareFileURL = nil
         }
         .confirmationDialog("Удалить кейс?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Удалить", role: .destructive) {
@@ -656,14 +636,25 @@ private struct PortfolioInstagramPostPage: View {
             }
             Button("Отмена", role: .cancel) {}
         }
-        .alert("Video editor", isPresented: $showVideoEditorNotice) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("Монтаж видео будет открыт для этого кейса.")
-        }
         .sheet(isPresented: $showingEdit) {
             EditPortfolioItemView(item: item, onSave: onUpdateDetails)
                 .preferredColorScheme(.dark)
+        }
+        .sheet(isPresented: $showingShare) {
+            if let shareFileURL {
+                PortfolioShareSheet(activityItems: [shareFileURL])
+            }
+        }
+        .alert(
+            "Не удалось поделиться",
+            isPresented: Binding(
+                get: { shareError != nil },
+                set: { if !$0 { shareError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(shareError ?? "")
         }
     }
 
@@ -740,12 +731,26 @@ private struct PortfolioInstagramPostPage: View {
             }
             .disabled(busyLike)
 
-            Image(systemName: "bubble.right")
+            // Раньше значок был просто картинкой — тап ничего не делал.
+            Button {
+                commentFieldFocused = true
+            } label: {
+                Image(systemName: "bubble.right")
+            }
 
             if item.moderationStatus == "approved" {
-                ShareLink(item: item.displayMediaUrl ?? "") {
-                    Image(systemName: "paperplane")
+                // Раньше делились подписанной ссылкой на файл — она умирает через
+                // 10 минут. Теперь скачиваем файл и отдаём в системное «Поделиться».
+                Button {
+                    Task { await prepareShare() }
+                } label: {
+                    if preparingShare {
+                        ProgressView().tint(.white)
+                    } else {
+                        Image(systemName: "paperplane")
+                    }
                 }
+                .disabled(preparingShare)
             }
 
             Spacer()
@@ -771,13 +776,6 @@ private struct PortfolioInstagramPostPage: View {
                     } label: {
                         Label(isPinned ? "Открепить" : "Закрепить", systemImage: isPinned ? "pin.slash" : "pin")
                     }
-                    if item.type == "video" {
-                        Button {
-                            showVideoEditorNotice = true
-                        } label: {
-                            Label("Монтаж видео", systemImage: "wand.and.stars")
-                        }
-                    }
                     Button(role: .destructive) {
                         confirmDelete = true
                     } label: {
@@ -794,14 +792,14 @@ private struct PortfolioInstagramPostPage: View {
 
     private var captionBlock: some View {
         VStack(alignment: .leading, spacing: 5) {
-            if canEdit || item.needsModerationBadge {
+            // Плашку «Автопроверка пройдена» больше не показываем (Адильхан 09.10):
+            // она лишняя. Плашка остаётся, только если кейс ждёт проверку или отклонён.
+            if item.needsModerationBadge {
                 VStack(alignment: .leading, spacing: 4) {
                     PortfolioModerationBadge(item: item)
-                    if item.needsModerationBadge {
-                        Text(item.moderationReason?.isEmpty == false ? item.moderationReason! : "Автоматическая проверка будет повторена.")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.white.opacity(0.62))
-                    }
+                    Text(item.moderationReason?.isEmpty == false ? item.moderationReason! : "Автоматическая проверка будет повторена.")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.62))
                 }
                 .padding(.bottom, 4)
             }
@@ -820,50 +818,34 @@ private struct PortfolioInstagramPostPage: View {
                     .font(.system(size: 14, weight: .regular))
                     .foregroundColor(.white.opacity(0.82))
             }
-            if item.type == "video", canEdit {
-                Button {
-                    showVideoEditorNotice = true
-                } label: {
-                    Label("Открыть монтаж видео", systemImage: "wand.and.stars")
-                        .font(.system(size: 13, weight: .bold))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(.white)
-            }
         }
     }
 
     private var commentsView: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if comments.count > 4 {
-                Text("Посмотреть все комментарии: \(comments.count)")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.52))
+            // Раньше надпись «Посмотреть все» была просто текстом, а показывались
+            // только первые 6 — остальные комментарии нельзя было открыть.
+            if comments.count > 6 && !showAllComments {
+                Button("Посмотреть все комментарии: \(comments.count)") {
+                    showAllComments = true
+                }
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.white.opacity(0.52))
             }
-            ForEach(comments.prefix(6)) { comment in
+            ForEach(showAllComments ? Array(comments) : Array(comments.prefix(6))) { comment in
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "person.crop.circle.fill")
                         .foregroundColor(.white.opacity(0.5))
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(comment.userName?.isEmpty == false ? comment.userName! : "Xfive marketing")
+                        Text(commentAuthorName(comment))
                             .font(.system(size: 11, weight: .bold))
                             .foregroundColor(.white.opacity(0.65))
                         Text(comment.text)
                             .font(.system(size: 13))
                             .foregroundColor(.white)
-                        HStack(spacing: 12) {
-                            Button("Ответить") {
-                                commentDraft = "@\(comment.userName?.isEmpty == false ? comment.userName! : "xfive") "
-                            }
-                            Button(localLikedComments.contains(comment.id) ? "Нравится" : "Лайк") {
-                                if localLikedComments.contains(comment.id) {
-                                    localLikedComments.remove(comment.id)
-                                } else {
-                                    localLikedComments.insert(comment.id)
-                                }
-                                X5Feedback.selection()
-                            }
+                        Button("Ответить") {
+                            commentDraft = "@\(commentAuthorName(comment)) "
+                            commentFieldFocused = true
                         }
                         .font(.system(size: 11, weight: .bold))
                         .foregroundColor(.white.opacity(0.48))
@@ -871,13 +853,24 @@ private struct PortfolioInstagramPostPage: View {
                     Spacer()
                 }
             }
+            if let commentError {
+                Text(commentError)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.red.opacity(0.9))
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func commentAuthorName(_ comment: PortfolioComment) -> String {
+        if let name = comment.userName, !name.isEmpty { return name }
+        return "Пользователь"
     }
 
     private var commentInput: some View {
         HStack(spacing: 8) {
             TextField("Комментарий...", text: $commentDraft)
+                .focused($commentFieldFocused)
                 .textFieldStyle(.plain)
                 .foregroundColor(.white)
                 .padding(.horizontal, 12)
@@ -920,204 +913,73 @@ private struct PortfolioInstagramPostPage: View {
         guard !text.isEmpty, !sendingComment else { return }
         sendingComment = true
         defer { sendingComment = false }
+        commentError = nil
         if let comment = await onAddComment(text) {
             comments.append(comment)
             commentDraft = ""
             X5Feedback.success()
+        } else {
+            // Раньше при ошибке ничего не происходило — казалось, что кнопка не работает.
+            commentError = "Не удалось отправить комментарий. Проверьте интернет и попробуйте ещё раз."
+            X5Feedback.error()
+        }
+    }
+
+    /// Скачиваем фото/видео кейса во временный файл и открываем «Поделиться».
+    private func prepareShare() async {
+        guard !preparingShare,
+              let s = item.displayMediaUrl, let remoteURL = URL(string: s)
+        else { return }
+        if let shareFileURL, FileManager.default.fileExists(atPath: shareFileURL.path) {
+            showingShare = true
+            return
+        }
+        preparingShare = true
+        defer { preparingShare = false }
+        do {
+            let (tempURL, response) = try await URLSession.shared.download(from: remoteURL)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            // Расширение берём из пути хранилища, иначе «Поделиться» не поймёт тип файла.
+            let ext = URL(string: item.mediaUrl ?? "")?.pathExtension ?? ""
+            let fallbackExt = item.type == "video" ? "mov" : "jpg"
+            let fileName = "Xfive-\(item.id.prefix(8)).\(ext.isEmpty ? fallbackExt : ext)"
+            let target = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+            try? FileManager.default.removeItem(at: target)
+            try FileManager.default.moveItem(at: tempURL, to: target)
+            shareFileURL = target
+            showingShare = true
+        } catch {
+            shareError = "Проверьте интернет и попробуйте ещё раз."
         }
     }
 }
 
-private struct PortfolioPostViewer: View {
-    let item: PortfolioItem
-    let canEdit: Bool
-    let onDelete: () -> Void
-    let onLoadLike: () async -> PortfolioLikeState
-    let onSetLiked: (Bool) async -> Bool
-    let onLoadComments: () async -> [PortfolioComment]
-    let onAddComment: (String) async -> PortfolioComment?
+/// Системное окно «Поделиться» для файла кейса.
+private struct PortfolioShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
 
-    @Environment(\.dismiss) private var dismiss
-    @State private var likeState = PortfolioLikeState(isLiked: false, count: 0)
-    @State private var comments: [PortfolioComment] = []
-    @State private var commentDraft = ""
-    @State private var busyLike = false
-    @State private var sendingComment = false
-    @State private var player: AVPlayer?
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.black.ignoresSafeArea()
-                TabView {
-                    postPage
-                }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-            }
-            .navigationTitle(item.title?.isEmpty == false ? item.title! : "Пост")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Готово") { dismiss() }
-                }
-                if canEdit {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button(role: .destructive) { onDelete() } label: {
-                            Image(systemName: "trash")
-                        }
-                    }
-                }
-            }
-            .task {
-                likeState = await onLoadLike()
-                comments = await onLoadComments()
-                if item.type == "video", let s = item.displayMediaUrl, let url = URL(string: s) {
-                    player = AVPlayer(url: url)
-                }
-            }
-            .onDisappear {
-                player?.pause()
-                player = nil
-            }
-        }
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
     }
 
-    private var postPage: some View {
-        VStack(spacing: 0) {
-            media
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            VStack(spacing: 12) {
-                if let description = item.description, !description.isEmpty {
-                    Text(description)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.82))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                actionRow
-                commentsView
-                commentInput
-            }
-            .padding(14)
-            .background(.ultraThinMaterial)
-        }
-    }
-
-    @ViewBuilder
-    private var media: some View {
-        if item.type == "video", let player {
-            VideoPlayer(player: player)
-        } else if let s = item.displayMediaUrl, let url = URL(string: s) {
-            CachedAsyncImage(url: url) { image in
-                image.resizable().scaledToFit()
-            } placeholder: {
-                ProgressView().tint(.white)
-            }
-            .padding(.horizontal, 10)
-        } else {
-            Image(systemName: "photo")
-                .font(.system(size: 56, weight: .light))
-                .foregroundColor(.white.opacity(0.45))
-        }
-    }
-
-    private var actionRow: some View {
-        HStack(spacing: 18) {
-            Button {
-                Task { await toggleLike() }
-            } label: {
-                Label("\(likeState.count)", systemImage: likeState.isLiked ? "heart.fill" : "heart")
-            }
-            .disabled(busyLike)
-
-            Label("\(comments.count)", systemImage: "text.bubble")
-
-            if item.moderationStatus == "approved" {
-                ShareLink(item: item.displayMediaUrl ?? "") {
-                    Label("Поделиться", systemImage: "square.and.arrow.up")
-                }
-            }
-
-            Spacer()
-        }
-        .font(.system(size: 14, weight: .bold))
-        .foregroundColor(.white)
-    }
-
-    private var commentsView: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(comments.prefix(4)) { comment in
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "person.crop.circle.fill")
-                        .foregroundColor(.white.opacity(0.5))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(comment.userName?.isEmpty == false ? comment.userName! : "Xfive marketing")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(.white.opacity(0.65))
-                        Text(comment.text)
-                            .font(.system(size: 13))
-                            .foregroundColor(.white)
-                    }
-                    Spacer()
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var commentInput: some View {
-        HStack(spacing: 8) {
-            TextField("Комментарий...", text: $commentDraft)
-                .textFieldStyle(.plain)
-                .foregroundColor(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(Color.white.opacity(0.08))
-                .clipShape(Capsule())
-            Button {
-                Task { await sendComment() }
-            } label: {
-                Image(systemName: sendingComment ? "hourglass" : "arrow.up.circle.fill")
-                    .font(.system(size: 28))
-            }
-            .disabled(commentDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || sendingComment)
-        }
-        .foregroundColor(.accentColor)
-    }
-
-    private func toggleLike() async {
-        guard !busyLike else { return }
-        busyLike = true
-        defer { busyLike = false }
-        let next = !likeState.isLiked
-        guard await onSetLiked(next) else { return }
-        likeState = PortfolioLikeState(isLiked: next, count: max(0, likeState.count + (next ? 1 : -1)))
-    }
-
-    private func sendComment() async {
-        let text = commentDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !sendingComment else { return }
-        sendingComment = true
-        defer { sendingComment = false }
-        if let comment = await onAddComment(text) {
-            comments.append(comment)
-            commentDraft = ""
-        }
-    }
+    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
 }
 
 private struct EditPortfolioItemView: View {
     let item: PortfolioItem
-    let onSave: (String?, String?) async -> PortfolioItem?
+    /// Последний параметр — новая обложка видео (nil — не меняли).
+    let onSave: (String?, String?, UIImage?) async -> PortfolioItem?
 
     @Environment(\.dismiss) private var dismiss
     @State private var title: String
     @State private var description: String
+    @State private var newCover: UIImage?
     @State private var saving = false
     @State private var errorText: String?
 
-    init(item: PortfolioItem, onSave: @escaping (String?, String?) async -> PortfolioItem?) {
+    init(item: PortfolioItem, onSave: @escaping (String?, String?, UIImage?) async -> PortfolioItem?) {
         self.item = item
         self.onSave = onSave
         _title = State(initialValue: item.title ?? "")
@@ -1133,8 +995,19 @@ private struct EditPortfolioItemView: View {
                         .lineLimit(3...7)
                 }
                 if item.type == "video" {
+                    // Вместо подсказки про «монтаж» (его нет) — смена обложки видео.
                     Section {
-                        Label("Видео можно отправить в монтаж из меню поста.", systemImage: "wand.and.stars")
+                        PortfolioCoverPickerRow(
+                            cover: $newCover,
+                            currentCoverURL: item.hasVideoCover
+                                ? item.signedThumbnailUrl.flatMap { URL(string: $0) }
+                                : nil,
+                            fallbackFrame: nil
+                        )
+                    } header: {
+                        Text("Обложка видео")
+                    } footer: {
+                        Text("Обложку видно в сетке портфолио. После смены кейс снова пройдёт автопроверку.")
                     }
                 }
                 if let errorText {
@@ -1171,25 +1044,129 @@ private struct EditPortfolioItemView: View {
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
         if await onSave(cleanTitle.isEmpty ? nil : cleanTitle,
-                        cleanDescription.isEmpty ? nil : cleanDescription) != nil {
+                        cleanDescription.isEmpty ? nil : cleanDescription,
+                        newCover) != nil {
             X5Feedback.success()
             dismiss()
         } else {
             X5Feedback.error()
-            errorText = "Не удалось сохранить."
+            errorText = newCover == nil
+                ? "Не удалось сохранить."
+                : "Не удалось сохранить обложку. Проверьте интернет и попробуйте ещё раз."
         }
+    }
+}
+
+/// Выбор обложки видео из галереи (Адильхан 09.10: «ставить обложку для видео»).
+/// Одна строка Form: обе кнопки .borderless и одна галерея на строку — иначе
+/// в Form тап срабатывает на всех кнопках строки и галерея «моргает» (как было в CourseUP).
+private struct PortfolioCoverPickerRow: View {
+    @Binding var cover: UIImage?
+    /// Обложка с сервера — показываем, пока не выбрали новую.
+    let currentCoverURL: URL?
+    /// Кадр из видео, который станет обложкой, если свою не выбрать.
+    let fallbackFrame: UIImage?
+
+    @State private var pickerItem: PhotosPickerItem?
+    @State private var showingPicker = false
+    @State private var loading = false
+    @State private var errorText: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                showingPicker = true
+            } label: {
+                ZStack {
+                    Color.white.opacity(0.06)
+                    if let cover {
+                        Image(uiImage: cover).resizable().scaledToFill()
+                    } else if let currentCoverURL {
+                        CachedAsyncImage(url: currentCoverURL) { image in
+                            image
+                                .resizable()
+                                .scaledToFill()
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        } placeholder: {
+                            ProgressView().tint(.white)
+                        }
+                    } else if let fallbackFrame {
+                        Image(uiImage: fallbackFrame).resizable().scaledToFill()
+                    } else {
+                        Image(systemName: "photo.badge.plus")
+                            .font(.system(size: 28, weight: .light))
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+                    if loading {
+                        Color.black.opacity(0.4)
+                        ProgressView().tint(.white)
+                    }
+                }
+                .frame(width: 120, height: 160)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.borderless)
+            .disabled(loading)
+            .frame(maxWidth: .infinity)
+
+            Button {
+                showingPicker = true
+            } label: {
+                Label(cover == nil ? "Выбрать обложку из галереи" : "Заменить обложку",
+                      systemImage: "photo.on.rectangle")
+            }
+            .buttonStyle(.borderless)
+            .disabled(loading)
+
+            if let errorText {
+                Text(errorText)
+                    .font(.footnote)
+                    .foregroundColor(.red)
+            }
+        }
+        .photosPicker(isPresented: $showingPicker, selection: $pickerItem, matching: .images)
+        .onChange(of: pickerItem) { newValue in
+            guard let newValue else { return }
+            Task { await load(newValue) }
+        }
+    }
+
+    private func load(_ item: PhotosPickerItem) async {
+        loading = true
+        errorText = nil
+        do {
+            let prepared = try await PickedPhotoLoader.loadPrepared(from: item)
+            cover = prepared.preview
+        } catch {
+            errorText = PickedPhotoLoader.errorText
+        }
+        loading = false
+        // Сброс выбора: иначе то же фото повторно не выбрать.
+        if pickerItem == item { pickerItem = nil }
     }
 }
 
 // MARK: - Add item
 
+/// Результат подготовки видео: сетка кадров для автопроверки + кадр для обложки.
+private struct PortfolioVideoPreview: Sendable {
+    let sheet: Data
+    let coverFrameJPEG: Data?
+}
+
 struct AddPortfolioItemView: View {
-    let onSave: (Data, String, String, String, Data?, String?, String?) async -> Bool
+    /// (файл, тип, mime, расширение, превью, «у превью есть обложка», название, описание)
+    let onSave: (Data, String, String, String, Data?, Bool, String?, String?) async -> Bool
 
     @Environment(\.dismiss) private var dismiss
     @State private var mediaItem: PhotosPickerItem?
     @State private var mediaData: Data?
     @State private var videoThumbnailData: Data?
+    /// Кадр из видео — обложка по умолчанию.
+    @State private var videoCoverFrame: UIImage?
+    /// Обложка, которую автор выбрал сам.
+    @State private var pickedCover: UIImage?
     @State private var mediaType: String = "image"
     @State private var mime: String = "image/jpeg"
     @State private var ext: String = "jpg"
@@ -1212,8 +1189,8 @@ struct AddPortfolioItemView: View {
                                     .font(.system(size: 15, weight: .semibold))
                             }
                             .frame(maxWidth: .infinity, minHeight: 160)
-                        } else if mediaType == "video", let thumbnailData = videoThumbnailData,
-                           let image = UIImage(data: thumbnailData) {
+                        } else if mediaType == "video", let image = pickedCover ?? videoCoverFrame {
+                            // Показываем обложку, а не служебную сетку кадров.
                             ZStack {
                                 Image(uiImage: image)
                                     .resizable()
@@ -1252,8 +1229,24 @@ struct AddPortfolioItemView: View {
                         preparingMedia = newValue != nil
                         mediaData = nil
                         videoThumbnailData = nil
+                        videoCoverFrame = nil
+                        pickedCover = nil
                         errorText = nil
                         Task { await loadMedia(newValue, generation: generation) }
+                    }
+                }
+
+                if mediaType == "video", mediaData != nil {
+                    Section {
+                        PortfolioCoverPickerRow(
+                            cover: $pickedCover,
+                            currentCoverURL: nil,
+                            fallbackFrame: videoCoverFrame
+                        )
+                    } header: {
+                        Text("Обложка видео")
+                    } footer: {
+                        Text("Обложку видно в сетке портфолио. Если не выбрать — возьмём кадр из видео.")
                     }
                 }
 
@@ -1294,12 +1287,14 @@ struct AddPortfolioItemView: View {
         defer { saving = false }
         let titleTrim = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let descTrim = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        let thumbnail = videoThumbnailForUpload()
         let ok = await onSave(
             data,
             mediaType,
             mime,
             ext,
-            videoThumbnailData,
+            thumbnail.data,
+            thumbnail.hasCover,
             titleTrim.isEmpty ? nil : titleTrim,
             descTrim.isEmpty ? nil : descTrim
         )
@@ -1308,6 +1303,19 @@ struct AddPortfolioItemView: View {
         } else {
             errorText = "Не удалось сохранить. Попробуй ещё раз."
         }
+    }
+
+    /// Превью видео для загрузки: обложка (своя или кадр) сверху + сетка кадров
+    /// снизу — автопроверка видит и то и другое (см. PortfolioVideoCover).
+    private func videoThumbnailForUpload() -> (data: Data?, hasCover: Bool) {
+        guard mediaType == "video", let sheetData = videoThumbnailData else {
+            return (videoThumbnailData, false)
+        }
+        if let cover = pickedCover ?? videoCoverFrame,
+           let composed = PortfolioVideoCover.compose(cover: cover, frameSheet: UIImage(data: sheetData)) {
+            return (composed, true)
+        }
+        return (videoThumbnailData, false)
     }
 
     /// Re-encode picked image as JPEG ≤1.5MB to keep uploads fast.
@@ -1345,7 +1353,8 @@ struct AddPortfolioItemView: View {
             mediaType = "video"
             mime = videoMime
             ext = videoExtension
-            videoThumbnailData = thumbnail
+            videoThumbnailData = thumbnail?.sheet
+            videoCoverFrame = thumbnail?.coverFrameJPEG.flatMap { UIImage(data: $0) }
             mediaData = data
         } else {
             let compressed = compress(data)
@@ -1359,7 +1368,7 @@ struct AddPortfolioItemView: View {
         preparingMedia = false
     }
 
-    private func makeVideoThumbnail(from data: Data, fileExtension: String) async -> Data? {
+    private func makeVideoThumbnail(from data: Data, fileExtension: String) async -> PortfolioVideoPreview? {
         await Task.detached(priority: .userInitiated) {
             await Self.generateVideoThumbnail(from: data, fileExtension: fileExtension)
         }.value
@@ -1370,7 +1379,7 @@ struct AddPortfolioItemView: View {
     nonisolated private static func generateVideoThumbnail(
         from data: Data,
         fileExtension: String
-    ) async -> Data? {
+    ) async -> PortfolioVideoPreview? {
         let safeExtension = fileExtension.isEmpty ? "mov" : fileExtension
         let fileURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("portfolio-preview-\(UUID().uuidString)")
@@ -1400,7 +1409,10 @@ struct AddPortfolioItemView: View {
                     frames.append(UIImage(cgImage: cgImage))
                 }
             }
-            return makeVideoContactSheet(from: frames)
+            guard let sheet = makeVideoContactSheet(from: frames) else { return nil }
+            // Первый кадр выборки (≈4% длины, не чёрный нулевой) — обложка по умолчанию.
+            let coverFrameJPEG = frames.first?.jpegData(compressionQuality: 0.85)
+            return PortfolioVideoPreview(sheet: sheet, coverFrameJPEG: coverFrameJPEG)
         } catch {
             return nil
         }

@@ -339,17 +339,34 @@ private struct CoursePlaybackStatus: View {
     }
 }
 
+/// Полноэкранный плеер урока.
+/// Адильхан 09.10 22:30: при зуме видео системные пауза и ползунок увеличивались вместе с картинкой
+/// (scaleEffect висел на VideoPlayer целиком), а крестик/«Авто»/сброс торчали посередине и не прятались.
+/// Теперь зумится только слой картинки (PlayerLayerView без системных кнопок), а свои кнопки лежат
+/// поверх, обычного размера, и прячутся через 3 с — тап по видео показывает их снова.
+/// идея: вынести эти кнопки и во встроенный плеер, тогда SystemPlayerChrome станет не нужен.
 private struct FullScreenVideoPlayer: View {
     @ObservedObject var playback: CourseVideoPlaybackController
     @Binding var viewport: VideoViewportState
 
     @Environment(\.dismiss) private var dismiss
+    @StateObject private var timeline = PlayerTimeline()
+    @State private var controlsVisible = true
+    @State private var hideTask: Task<Void, Never>?
+    @State private var scrubSeconds: Double?
     @GestureState private var gestureMagnification: CGFloat = 1
     @GestureState private var gestureTranslation: CGSize = .zero
+
+    private static let skipSeconds = 10.0
+    private static let autoHideNanoseconds: UInt64 = 3_000_000_000
 
     private var displayedScale: CGFloat {
         let proposed = viewport.scale * Double(gestureMagnification)
         return CGFloat(min(max(proposed, VideoViewportState.minimumScale), VideoViewportState.maximumScale))
+    }
+
+    private var isZoomed: Bool {
+        viewport != VideoViewportState() || displayedScale > CGFloat(VideoViewportState.minimumScale)
     }
 
     private func displayedTranslation(in viewportSize: CGSize) -> CGSize {
@@ -369,61 +386,38 @@ private struct FullScreenVideoPlayer: View {
 
     var body: some View {
         GeometryReader { proxy in
-            ZStack(alignment: .top) {
+            ZStack {
                 Color.black
 
-                VideoPlayer(player: playback.player)
+                // Зум и сдвиг — только у картинки. Кнопки ниже в ZStack не масштабируются.
+                PlayerLayerView(player: playback.player)
                     .frame(width: proxy.size.width, height: proxy.size.height)
                     .scaleEffect(displayedScale)
                     .offset(displayedTranslation(in: proxy.size))
+                    .allowsHitTesting(false)
 
-                HStack {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 17, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(width: 42, height: 42)
-                            .background(Color.black.opacity(0.58), in: Circle())
-                    }
-                    .accessibilityLabel("Close")
+                // Слой жестов под кнопками: щипок — зум, палец — сдвиг, тап — кнопки, двойной тап — сброс.
+                Color.clear
+                    .contentShape(Rectangle())
+                    .gesture(tapGestures)
+                    .simultaneousGesture(magnificationGesture(in: proxy.size))
+                    .simultaneousGesture(translationGesture(in: proxy.size))
 
-                    Spacer()
+                controls(in: proxy)
+                    .opacity(controlsVisible ? 1 : 0)
+                    .allowsHitTesting(controlsVisible)
+                    .animation(.easeInOut(duration: 0.2), value: controlsVisible)
 
-                    CourseQualityMenu(playback: playback)
-
-                    Button {
-                        viewport.reset()
-                    } label: {
-                        Image(systemName: "arrow.counterclockwise")
-                            .font(.system(size: 17, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(width: 42, height: 42)
-                            .background(Color.black.opacity(0.58), in: Circle())
-                    }
-                    .disabled(viewport == VideoViewportState())
-                    .opacity(viewport == VideoViewportState() ? 0.45 : 1)
-                    .accessibilityLabel("Reset zoom")
-                }
-                .padding(.leading, max(16, proxy.safeAreaInsets.leading))
-                .padding(.trailing, max(16, proxy.safeAreaInsets.trailing))
-                // Ниже системной полосы VideoPlayer (AirPlay, звук) — иначе крестик и сброс зума на неё наезжают.
-                .padding(.top, max(12, proxy.safeAreaInsets.top) + SystemPlayerChrome.topClearance)
-
+                // Ошибки и «Загружаем видео» видны всегда, даже когда кнопки спрятаны.
                 VStack {
                     Spacer()
                     CoursePlaybackStatus(playback: playback)
                         .padding(.horizontal, 16)
-                        .padding(.bottom, proxy.safeAreaInsets.bottom + SystemPlayerChrome.bottomClearance)
+                        .padding(.bottom, proxy.safeAreaInsets.bottom + (controlsVisible ? 86 : 20))
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
-            .contentShape(Rectangle())
             .clipped()
-            .simultaneousGesture(magnificationGesture(in: proxy.size))
-            .simultaneousGesture(translationGesture(in: proxy.size))
-            .simultaneousGesture(resetGesture)
             .onChange(of: proxy.size) { newSize in
                 viewport.clampTranslation(
                     viewportWidth: Double(newSize.width),
@@ -436,11 +430,176 @@ private struct FullScreenVideoPlayer: View {
         .background(Color.black.ignoresSafeArea())
         .onAppear {
             AppOrientationCoordinator.enterVideoFullscreen()
+            timeline.attach(to: playback.player)
             playback.play()
+            scheduleHide()
         }
         .onDisappear {
+            hideTask?.cancel()
+            timeline.detach()
             AppOrientationCoordinator.leaveVideoFullscreen()
         }
+        .onChange(of: timeline.isPlaying) { _ in
+            scheduleHide()
+        }
+    }
+
+    // MARK: - Кнопки
+
+    private func controls(in proxy: GeometryProxy) -> some View {
+        ZStack {
+            // Тёмные полосы сверху и снизу, чтобы белые кнопки читались на светлом видео.
+            VStack(spacing: 0) {
+                LinearGradient(colors: [.black.opacity(0.55), .clear], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 110)
+                Spacer()
+                LinearGradient(colors: [.clear, .black.opacity(0.6)], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 130)
+            }
+            .allowsHitTesting(false)
+
+            VStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    roundButton(systemName: "xmark", label: "Close") {
+                        dismiss()
+                    }
+
+                    Spacer()
+
+                    CourseQualityMenu(playback: playback)
+
+                    // Сброс зума нужен только когда видео увеличено — иначе это лишняя кнопка (скрин 22:29).
+                    if isZoomed {
+                        roundButton(systemName: "arrow.counterclockwise", label: "Reset zoom") {
+                            viewport.reset()
+                            scheduleHide()
+                        }
+                    }
+                }
+                .padding(.leading, max(16, proxy.safeAreaInsets.leading))
+                .padding(.trailing, max(16, proxy.safeAreaInsets.trailing))
+                .padding(.top, max(12, proxy.safeAreaInsets.top))
+
+                Spacer()
+
+                HStack(spacing: 44) {
+                    roundButton(systemName: "gobackward.10", label: "Назад 10 секунд", size: 54) {
+                        timeline.skip(by: -Self.skipSeconds)
+                        scheduleHide()
+                    }
+                    roundButton(
+                        systemName: timeline.isPlaying ? "pause.fill" : "play.fill",
+                        label: timeline.isPlaying ? "Пауза" : "Смотреть",
+                        size: 70
+                    ) {
+                        togglePlayback()
+                    }
+                    roundButton(systemName: "goforward.10", label: "Вперёд 10 секунд", size: 54) {
+                        timeline.skip(by: Self.skipSeconds)
+                        scheduleHide()
+                    }
+                }
+
+                Spacer()
+
+                if timeline.durationSeconds > 0 {
+                    HStack(spacing: 12) {
+                        Text(Self.timeText(scrubSeconds ?? timeline.currentSeconds))
+                        Slider(
+                            value: Binding(
+                                get: { min(scrubSeconds ?? timeline.currentSeconds, timeline.durationSeconds) },
+                                set: { scrubSeconds = $0 }
+                            ),
+                            in: 0...timeline.durationSeconds,
+                            onEditingChanged: { editing in
+                                if editing {
+                                    hideTask?.cancel()
+                                } else if let target = scrubSeconds {
+                                    timeline.seek(to: target)
+                                    scrubSeconds = nil
+                                    scheduleHide()
+                                }
+                            }
+                        )
+                        .tint(Color.accentColor)
+                        Text(Self.timeText(timeline.durationSeconds))
+                    }
+                    .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                    .foregroundColor(.white)
+                    .padding(.leading, max(20, proxy.safeAreaInsets.leading))
+                    .padding(.trailing, max(20, proxy.safeAreaInsets.trailing))
+                    .padding(.bottom, max(16, proxy.safeAreaInsets.bottom))
+                }
+            }
+        }
+    }
+
+    private func roundButton(
+        systemName: String,
+        label: String,
+        size: CGFloat = 42,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: size * 0.42, weight: .bold))
+                .foregroundColor(.white)
+                .frame(width: size, height: size)
+                .background(Color.black.opacity(0.58), in: Circle())
+        }
+        .accessibilityLabel(label)
+    }
+
+    private func togglePlayback() {
+        if timeline.isPlaying {
+            playback.pause()
+        } else {
+            // Досмотрел до конца — «Смотреть» начинает сначала, а не стоит на последнем кадре.
+            if timeline.durationSeconds > 0, timeline.currentSeconds >= timeline.durationSeconds - 0.5 {
+                timeline.seek(to: 0)
+            }
+            playback.play()
+        }
+        scheduleHide()
+    }
+
+    /// Кнопки прячутся через 3 с, только пока видео идёт и ползунок не держат.
+    private func scheduleHide() {
+        hideTask?.cancel()
+        guard timeline.isPlaying, scrubSeconds == nil else { return }
+        hideTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: Self.autoHideNanoseconds)
+            guard !Task.isCancelled, timeline.isPlaying, scrubSeconds == nil else { return }
+            controlsVisible = false
+        }
+    }
+
+    private static func timeText(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds > 0 else { return "0:00" }
+        let total = Int(seconds.rounded(.down))
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let secs = total % 60
+        return hours > 0
+            ? String(format: "%d:%02d:%02d", hours, minutes, secs)
+            : String(format: "%d:%02d", minutes, secs)
+    }
+
+    // MARK: - Жесты
+
+    private var tapGestures: some Gesture {
+        TapGesture(count: 2)
+            .onEnded {
+                viewport.reset()
+            }
+            .exclusively(before: TapGesture(count: 1).onEnded {
+                controlsVisible.toggle()
+                if controlsVisible {
+                    scheduleHide()
+                } else {
+                    hideTask?.cancel()
+                }
+            })
     }
 
     private func magnificationGesture(in viewportSize: CGSize) -> some Gesture {
@@ -473,12 +632,111 @@ private struct FullScreenVideoPlayer: View {
                 )
             }
     }
+}
 
-    private var resetGesture: some Gesture {
-        TapGesture(count: 2)
-            .onEnded {
-                viewport.reset()
+/// Время и состояние плеера для своих кнопок полноэкранного режима.
+@MainActor
+private final class PlayerTimeline: ObservableObject {
+    @Published private(set) var currentSeconds: Double = 0
+    @Published private(set) var durationSeconds: Double = 0
+    @Published private(set) var isPlaying = false
+
+    private var player: AVPlayer?
+    private var timeObserver: Any?
+    private var statusObservation: NSKeyValueObservation?
+
+    func attach(to player: AVPlayer) {
+        detach()
+        self.player = player
+        refresh(time: player.currentTime())
+        isPlaying = player.timeControlStatus != .paused
+        timeObserver = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
+            queue: .main
+        ) { [weak self] time in
+            Task { @MainActor [weak self] in
+                self?.refresh(time: time)
             }
+        }
+        statusObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
+            // «Ждёт сеть» считаем игрой: кнопка показывает паузу, как в системном плеере.
+            let playing = player.timeControlStatus != .paused
+            Task { @MainActor [weak self] in
+                self?.isPlaying = playing
+            }
+        }
+    }
+
+    func detach() {
+        if let timeObserver, let player {
+            player.removeTimeObserver(timeObserver)
+        }
+        timeObserver = nil
+        statusObservation?.invalidate()
+        statusObservation = nil
+        player = nil
+    }
+
+    func skip(by seconds: Double) {
+        let upper = durationSeconds > 0 ? durationSeconds : .greatestFiniteMagnitude
+        seek(to: min(max(currentSeconds + seconds, 0), upper))
+    }
+
+    func seek(to seconds: Double) {
+        guard let player else { return }
+        // Сразу двигаем цифры, чтобы ползунок не прыгал назад, пока плеер ищет кадр.
+        currentSeconds = seconds
+        player.seek(
+            to: CMTime(seconds: seconds, preferredTimescale: 600),
+            toleranceBefore: .zero,
+            toleranceAfter: .zero
+        )
+    }
+
+    private func refresh(time: CMTime) {
+        let seconds = time.seconds
+        if seconds.isFinite {
+            currentSeconds = max(seconds, 0)
+        }
+        // У HLS длительность приходит не сразу; у живого потока её нет — тогда ползунок скрыт.
+        if let duration = player?.currentItem?.duration.seconds, duration.isFinite, duration > 0 {
+            durationSeconds = duration
+        }
+    }
+}
+
+/// Голая картинка AVPlayer без системных кнопок — её можно зумить, не трогая управление.
+private struct PlayerLayerView: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> PlayerLayerContainerView {
+        let view = PlayerLayerContainerView()
+        view.player = player
+        return view
+    }
+
+    func updateUIView(_ uiView: PlayerLayerContainerView, context: Context) {
+        if uiView.player !== player {
+            uiView.player = player
+        }
+    }
+}
+
+private final class PlayerLayerContainerView: UIView {
+    override class var layerClass: AnyClass {
+        AVPlayerLayer.self
+    }
+
+    private var playerLayer: AVPlayerLayer {
+        layer as! AVPlayerLayer
+    }
+
+    var player: AVPlayer? {
+        get { playerLayer.player }
+        set {
+            playerLayer.videoGravity = .resizeAspect
+            playerLayer.player = newValue
+        }
     }
 }
 

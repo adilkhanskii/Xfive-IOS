@@ -40,6 +40,8 @@ private enum HomeLayout {
     static let businessFeatureHeight: CGFloat = 198
     static let businessFeatureOverflow: CGFloat = 38
     static let businessTileHeight: CGFloat = 112
+    /// Одна плитка во всю ширину («Обложки YouTube») — как карточка «Озвучка».
+    static let businessSingleTileHeight: CGFloat = 148
     static let businessWideHeight: CGFloat = 184
     static let voicePromoHeight: CGFloat = 148
     static let sectionSpacing: CGFloat = 14
@@ -78,7 +80,8 @@ struct HomeView: View {
                 VStack(alignment: .leading, spacing: HomeLayout.sectionSpacing) {
                     heroBanner
                     promoCards
-                    aiStudioLauncher
+                    // Карточку «Все AI-инструменты» убрали (Адильхан 09.10: «ненужная вещь»).
+                    // Все инструменты и так есть на главной и в поиске.
                     trendsSection
                     businessSection
                 }
@@ -209,36 +212,6 @@ struct HomeView: View {
         }
     }
 
-    private var aiStudioLauncher: some View {
-        Button {
-            handle(.aiStudio)
-        } label: {
-            HStack(spacing: 14) {
-                Image(systemName: "sparkles.rectangle.stack.fill")
-                    .font(.system(size: 25, weight: .bold))
-                    .foregroundStyle(.black)
-                    .frame(width: 54, height: 54)
-                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 16))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Все AI-инструменты")
-                        .font(.system(size: 19, weight: .black))
-                        .foregroundStyle(.white)
-                    Text(aiStudioSubtitle)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.54))
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(Color.accentColor)
-            }
-            .padding(14)
-            .x5ClearGlass(cornerRadius: 20, highlight: 0.10)
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("x5.home.ai_studio")
-    }
-
     private var trendsSection: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline) {
@@ -294,29 +267,28 @@ struct HomeView: View {
                     .accessibilityIdentifier("x5.home.business.ai_influencer")
                 }
 
+                // Большая «Карточки товаров» открывает генератор карточек (как на сайте).
+                // Раньше вела в «Продающие баннеры», а сами карточки были на маленькой плитке,
+                // которую Адильхан попросил убрать 09.10 — иначе карточки остались бы только в трендах.
                 NativeHomeSalesBannerCard(
-                    action: { handle(imageAction("target_ad")) }
+                    action: { handle(imageAction("product_cards")) }
                 )
                 .accessibilityIdentifier("x5.home.business.sales_banners")
 
-                LazyVGrid(
-                    columns: [
-                        GridItem(.flexible(), spacing: HomeLayout.cardSpacing),
-                        GridItem(.flexible(), spacing: HomeLayout.cardSpacing)
-                    ],
-                    spacing: HomeLayout.cardSpacing
-                ) {
-                    ForEach(businessItems) { item in
-                        NativeHomeBusinessCard(
-                            title: item.title,
-                            subtitle: item.subtitle,
-                            assetName: item.assetName,
-                            accent: item.accent,
-                            actionTitle: nil,
-                            action: { handle(item.action) }
-                        )
-                        .accessibilityIdentifier("x5.home.business.\(item.id)")
-                    }
+                // Маленькую «Карточки товара» убрали (Адильхан 09.10): она дублировала
+                // большую «Карточки товаров» выше. «Обложки YouTube» осталась одна —
+                // во всю ширину, высотой как «Озвучка» ниже, чтобы ряд не выглядел пустым.
+                ForEach(businessItems) { item in
+                    NativeHomeBusinessCard(
+                        title: item.title,
+                        subtitle: item.subtitle,
+                        assetName: item.assetName,
+                        accent: item.accent,
+                        actionTitle: nil,
+                        heightOverride: HomeLayout.businessSingleTileHeight,
+                        action: { handle(item.action) }
+                    )
+                    .accessibilityIdentifier("x5.home.business.\(item.id)")
                 }
 
                 if isToolAvailable("voice") {
@@ -380,25 +352,8 @@ struct HomeView: View {
                 assetName: "HomeCoverYoutube",
                 accent: .red,
                 action: imageAction("youtube_cover")
-            ),
-            NativeHomeBusiness(
-                id: "product_cards",
-                title: "Карточки товара",
-                subtitle: "Для маркетплейсов",
-                assetName: "HomeCoverProductCards",
-                accent: X5Style.blue,
-                action: imageAction("product_cards")
             )
         ]
-    }
-
-    private var aiStudioSubtitle: String {
-        var names = ["Изображения"]
-        if isToolAvailable("voice") { names.append("MiniMax") }
-        if isToolAvailable("video") { names.append("Seedance") }
-        if isToolAvailable("lipsync") { names.append("Lipsync") }
-        if names.isEmpty { return "Только проверенные рабочие функции" }
-        return names.joined(separator: " · ")
     }
 
     private var hasBusinessTools: Bool {
@@ -918,9 +873,12 @@ private struct NativeHomeBusinessCard: View {
     let accent: Color
     let actionTitle: String?
     var compact = false
+    /// Своя высота для плитки во всю ширину; nil — как раньше.
+    var heightOverride: CGFloat? = nil
     let action: () -> Void
 
     private var cardHeight: CGFloat {
+        if let heightOverride { return heightOverride }
         if compact { return HomeLayout.businessWideHeight }
         if actionTitle != nil { return HomeLayout.businessFeatureHeight }
         return HomeLayout.businessTileHeight

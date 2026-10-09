@@ -58,8 +58,8 @@ class ReleaseVersionSourceTests(unittest.TestCase):
         # уроков, одна общая сборка; 247 — фикс двойной галереи обложки урока;
         # 08.10: 248 — ползунок голосовых + порядок курсов; 249 — то же +
         # перетаскивание карточек курсов в каталоге);
-        # 09.10: ревью App Store — сборка 251 (гарантийные правки Адильхана + доступ на 30 дней).
-        self.assertEqual(runtime_build_number, "251")
+        # 09.10 вечер: TestFlight 252 (вторая пачка правок Адильхана); App Store-ревью пока остаётся на 251.
+        self.assertEqual(runtime_build_number, "252")
         self.assertEqual(fastlane_version, marketing_version)
         self.assertIn(
             f"Version {marketing_version} build 251",

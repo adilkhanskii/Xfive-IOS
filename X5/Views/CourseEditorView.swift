@@ -86,6 +86,9 @@ struct CourseEditorView: View {
     // (а не PhotosPicker внутри строки Form, который «моргал» и открывался заново).
     @State private var showingCoverPicker = false
     @State private var uploadingCover = false
+    /// Фото из галереи читается (из iCloud бывает долго) — показываем спиннер.
+    @State private var loadingCoverPreview = false
+    @State private var coverPickError: String?
     /// Модуль, который ждёт подтверждения удаления (id, а не индекс: индексы
     /// сдвигаются, пока открыт диалог).
     @State private var pendingCategoryDeleteId: String?
@@ -115,6 +118,11 @@ struct CourseEditorView: View {
             Form {
                 Section {
                     coverPicker
+                    if let coverPickError {
+                        Text(coverPickError)
+                            .font(.footnote)
+                            .foregroundColor(.red)
+                    }
                 }
 
                 Section("Основное") {
@@ -306,7 +314,7 @@ struct CourseEditorView: View {
                 } else {
                     placeholder
                 }
-                if uploadingCover {
+                if uploadingCover || loadingCoverPreview {
                     Color.black.opacity(0.4)
                     ProgressView().tint(.white)
                 }
@@ -319,6 +327,7 @@ struct CourseEditorView: View {
             .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.borderless)
+        .disabled(loadingCoverPreview)
     }
 
     private var placeholder: some View {
@@ -561,14 +570,21 @@ struct CourseEditorView: View {
     }
 
     private func loadCoverPreview(_ item: PhotosPickerItem) async {
-        guard let data = try? await item.loadTransferable(type: Data.self) else { return }
-        // Ужимаем вне главного потока: полное фото 12+ Мп декодируется заметно.
-        let prepared = await Task.detached(priority: .userInitiated) {
-            CourseCoverImage.prepare(data)
-        }.value
-        guard let prepared else { return }
-        coverPreviewData = prepared.jpeg
-        coverPreviewImage = prepared.preview
+        // Раньше: try? + молчаливый return → «выбрал фото, а обложка не поменялась».
+        // Теперь общий загрузчик (Data → файл, ужатие вне главного потока),
+        // спиннер на карточке и текст ошибки.
+        loadingCoverPreview = true
+        coverPickError = nil
+        do {
+            let prepared = try await PickedPhotoLoader.loadPrepared(from: item)
+            coverPreviewData = prepared.jpeg
+            coverPreviewImage = prepared.preview
+        } catch {
+            coverPickError = PickedPhotoLoader.errorText
+        }
+        loadingCoverPreview = false
+        // Сброс выбора: иначе то же фото второй раз не выбрать — onChange молчит.
+        if coverItem == item { coverItem = nil }
     }
 
     private func save() async {
@@ -1141,8 +1157,9 @@ private struct LessonDraftRow: View {
                     .foregroundStyle(.primary)
                 HStack(spacing: 8) {
                     Text(lesson.videoLabel)
+                    // Метку оставили: флаг по-прежнему открывает урок всем, автор должен это видеть.
                     if lesson.isFreePreview {
-                        Text("Бесплатный preview")
+                        Text("Бесплатный урок")
                     }
                 }
                 .font(.caption)
@@ -1256,7 +1273,8 @@ private struct LessonEditorSheet: View {
                 Section("Урок") {
                     TextField("Название урока", text: $title)
                         .textInputAutocapitalization(.sentences)
-                    Toggle("Бесплатный preview", isOn: $isFreePreview)
+                    // Переключатель «Бесплатный preview» убран (Адильхан 09.10: «нет смысла»).
+                    // Флаг isFreePreview не трогаем: старые уроки сохраняются с тем же значением.
                 }
 
                 Section {
@@ -1309,7 +1327,11 @@ private struct LessonEditorSheet: View {
 
                 Section {
                     Toggle("Продавать отдельно", isOn: $sellSeparately)
-                        .disabled(isFreePreview)
+                        // Переключателя preview больше нет, поэтому не блокируем продажу:
+                        // автор сам включил «Продавать отдельно» → урок перестаёт быть бесплатным.
+                        .onChange(of: sellSeparately) { newValue in
+                            if newValue { isFreePreview = false }
+                        }
                     if sellSeparately && !isFreePreview {
                         HStack {
                             Text("Цена урока")
@@ -1325,9 +1347,7 @@ private struct LessonEditorSheet: View {
                 } header: {
                     Text("Доступ")
                 } footer: {
-                    Text(sellSeparately && !isFreePreview
-                        ? "Ученик сможет купить только этот урок. Цену подтверждает сервер, поэтому она должна быть больше нуля."
-                        : "Доступ к уроку задаётся покупкой всего курса или флагом бесплатного preview.")
+                    Text(accessFooterText)
                         .font(.footnote)
                 }
 
@@ -1461,6 +1481,17 @@ private struct LessonEditorSheet: View {
         }
     }
 
+    private var accessFooterText: String {
+        if sellSeparately && !isFreePreview {
+            return "Ученик сможет купить только этот урок. Цену подтверждает сервер, поэтому она должна быть больше нуля."
+        }
+        // Старый урок с флагом preview: честно пишем, что он открыт всем.
+        if isFreePreview {
+            return "Урок открыт бесплатно. Включите «Продавать отдельно», чтобы продавать его."
+        }
+        return "Доступ к уроку открывается покупкой всего курса."
+    }
+
     private var thumbnailActionTitle: String {
         if uploadingThumbnail { return "Загрузка..." }
         if pendingThumbnailData != nil || !thumbnailUrl.x5Trimmed.isEmpty { return "Заменить обложку" }
@@ -1509,24 +1540,22 @@ private struct LessonEditorSheet: View {
 
     private func importThumbnail(_ item: PhotosPickerItem) async {
         uploadingThumbnail = true
-        defer { uploadingThumbnail = false }
+        defer {
+            uploadingThumbnail = false
+            // Сброс выбора: иначе то же фото второй раз не выбрать — onChange молчит.
+            if thumbnailItem == item { thumbnailItem = nil }
+        }
         errorText = nil
 
-        guard let data = try? await item.loadTransferable(type: Data.self) else {
-            errorText = "Не удалось прочитать обложку."
-            return
+        // Общий загрузчик с генератором обложек: Data → запасной путь через файл,
+        // ужатие до 1600 px вне главного потока (см. PickedPhotoLoader).
+        do {
+            let prepared = try await PickedPhotoLoader.loadPrepared(from: item)
+            pendingThumbnailData = prepared.jpeg
+            pendingThumbnailImage = prepared.preview
+        } catch {
+            errorText = PickedPhotoLoader.errorText
         }
-        // Ужимаем до 1600 px вне главного потока (см. CourseCoverImage).
-        let prepared = await Task.detached(priority: .userInitiated) {
-            CourseCoverImage.prepare(data)
-        }.value
-        guard let prepared else {
-            errorText = "Не удалось прочитать обложку."
-            return
-        }
-
-        pendingThumbnailData = prepared.jpeg
-        pendingThumbnailImage = prepared.preview
     }
 
     private func commitAndDismiss() {
