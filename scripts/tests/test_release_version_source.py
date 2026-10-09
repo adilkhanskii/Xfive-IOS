@@ -51,18 +51,18 @@ class ReleaseVersionSourceTests(unittest.TestCase):
         ).group(1)
 
         self.assertEqual(marketing_version, "1.1.12")
-        # 1.1.9 (239) is live in the App Store; 1.1.10 ships as build 243 from
-        # release/ios, so runtime and review targets are the same number again.
+        # 09.10.2026: в App Store живая 1.1.10; ревью идёт как 1.1.12 сборка 251 из release/ios.
+        # Сборка в TestFlight и цель ревью снова один и тот же номер.
         # 07.10.2026: тестовые TestFlight-сборки ушли вперёд (245 — фикс модуля
         # курса + чат + город в профиле; 246 — то же + Bunny Stream для видео
         # уроков, одна общая сборка; 247 — фикс двойной галереи обложки урока;
         # 08.10: 248 — ползунок голосовых + порядок курсов; 249 — то же +
         # перетаскивание карточек курсов в каталоге);
-        # цель ревью App Store ниже остаётся 243.
+        # 09.10: ревью App Store — сборка 251 (гарантийные правки Адильхана + доступ на 30 дней).
         self.assertEqual(runtime_build_number, "251")
         self.assertEqual(fastlane_version, marketing_version)
         self.assertIn(
-            f"Version {marketing_version} build 243",
+            f"Version {marketing_version} build 251",
             review_notes,
         )
         self.assertIn(
@@ -70,7 +70,7 @@ class ReleaseVersionSourceTests(unittest.TestCase):
             submit_workflow,
         )
         self.assertIn(
-            'EXPECTED_BUILD: "243"',
+            'EXPECTED_BUILD: "251"',
             submit_workflow,
         )
         self.assertIn(
@@ -78,7 +78,7 @@ class ReleaseVersionSourceTests(unittest.TestCase):
             prepare_workflow,
         )
         self.assertIn(
-            'BUILD_NUMBER: "243"',
+            'BUILD_NUMBER: "251"',
             prepare_workflow,
         )
 

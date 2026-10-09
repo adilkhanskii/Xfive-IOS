@@ -1,1 +1,1 @@
-Clearer credit purchase confirmations and an additional check that the confirmed App Store product matches the selected pack.
+Pinned chat messages now show at the top for both people. Paid lessons and courses unlock for 30 days after purchase. Fixed overlapping video player buttons, voice message width and the reply banner.
