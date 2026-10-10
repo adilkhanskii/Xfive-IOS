@@ -74,7 +74,7 @@ struct AIInfluencerView: View {
     @State private var imageProvider = ImageGenerationProvider.gptImage2
     @State private var imageFormat = CharacterImageFormat.portrait
     @State private var imageQuality = CharacterImageQuality.standard
-    // Галерея через UIKit (X5PhotoPickerPresenter): SwiftUI-шная после Face ID
+    // Галерея — SystemPhotoPicker на корне экрана: SwiftUI-шная после Face ID
     // закрывалась и открывалась по кругу (Адильхан 10.10).
     @State private var showingReferencePicker = false
     @State private var referenceImage: UIImage?

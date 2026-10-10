@@ -15,7 +15,7 @@ struct ProfileView: View {
     @State private var showingVerified = false
     @State private var showingSettings = false
     @State private var showingEdit = false
-    // Галерея через UIKit (X5PhotoPickerPresenter): SwiftUI-шная после Face ID
+    // Галерея — SystemPhotoPicker на корне экрана: SwiftUI-шная после Face ID
     // закрывалась и открывалась по кругу (Адильхан 10.10).
     @State private var showingAvatarPicker = false
     @State private var uploadingAvatar = false

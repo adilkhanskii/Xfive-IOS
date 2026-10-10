@@ -163,7 +163,7 @@ class PortfolioModerationSourceTests(unittest.TestCase):
         self.assertIn("thumbnailData: thumbnailData", view)
         self.assertIn("videoThumbnailData,", view)
         self.assertIn("@State private var preparingMedia = false", view)
-        self.assertIn(".disabled(saving || preparingMedia || mediaData == nil)", view)
+        self.assertIn(".disabled(saving || preparingMedia || mediaData == nil || coverPick.loading)", view)
         self.assertIn("let thumbnailFractions:", view)
         self.assertGreaterEqual(view.count("generator.copyCGImage"), 1)
 
@@ -275,7 +275,7 @@ class PortfolioModerationSourceTests(unittest.TestCase):
         self.assertIn("@State private var preparingMedia", view)
         self.assertIn("@State private var mediaPreparationGeneration", view)
         self.assertIn(
-            ".disabled(saving || preparingMedia || mediaData == nil)", view
+            ".disabled(saving || preparingMedia || mediaData == nil || coverPick.loading)", view
         )
         self.assertIn(
             "guard generation == mediaPreparationGeneration else { return }", view

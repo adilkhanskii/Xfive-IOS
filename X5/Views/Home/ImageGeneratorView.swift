@@ -20,7 +20,7 @@ struct ImageGeneratorView: View {
     @State private var selectedQuantity = 1
     @State private var selectedSize: ImageGenerationSize = .square
     @State private var showingGallery = false
-    // Все фото на этом экране — через галерею UIKit (X5PhotoPickerPresenter):
+    // Все фото на этом экране — через галерею SystemPhotoPicker на корне экрана:
     // SwiftUI-шная закрывалась и открывалась заново после Face ID (Адильхан 10.10;
     // 18:05 — «Примеры обложек тоже тупняк»).
     @State private var showingMainPhotoPicker = false
@@ -285,10 +285,18 @@ struct ImageGeneratorView: View {
             Menu {
                 ForEach(ImageGenerationSize.allCases) { size in
                     if !size.isSupported(by: selectedProvider) {
-                        Button {} label: {
-                            Label("\(size.title) · \(size.unavailableLabel(for: selectedProvider))", systemImage: "lock")
+                        // Раньше — серая строка с замком, нажать нельзя: Адильхан 10.10 20:10
+                        // «вот эта не пашет». Теперь размер можно выбрать: модель сама
+                        // переключится на ту, что его умеет (если она есть в этом разделе).
+                        if let model = providerSupporting(size) {
+                            Button {
+                                X5Feedback.selection()
+                                selectedProvider = model
+                                selectedSize = size
+                            } label: {
+                                Label("\(size.title) · \(model.title)", systemImage: "arrow.triangle.2.circlepath")
+                            }
                         }
-                        .disabled(true)
                     } else {
                         Button {
                             X5Feedback.selection()
@@ -963,6 +971,11 @@ struct ImageGeneratorView: View {
         }
         references.append(contentsOf: referenceImages.map { $0.reference(with: .styleReference) })
         return references
+    }
+
+    /// Модель этого раздела, которая умеет такой размер (nil — никакая: строку не показываем).
+    private func providerSupporting(_ size: ImageGenerationSize) -> ImageGenerationProvider? {
+        availableProviders.first { size.isSupported(by: $0) }
     }
 
     private var availableProviders: [ImageGenerationProvider] {

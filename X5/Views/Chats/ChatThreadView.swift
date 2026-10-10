@@ -19,7 +19,7 @@ struct ChatThreadView: View {
     @State private var showingProfile: Bool = false
     @State private var showingMenu: Bool = false
     @State private var confirmBlock: Bool = false
-    /// Галерея UIKit (X5PhotoPickerPresenter): SwiftUI-шная после Face ID закрывалась
+    /// Галерея — SystemPhotoPicker на корне экрана: SwiftUI-шная после Face ID закрывалась
     /// и открывалась по кругу (Адильхан 10.10). До 10 фото/видео за раз, как в WhatsApp.
     @State private var showingMediaPicker: Bool = false
     /// Пачка: какое сейчас по счёту («Отправка 3 из 10»). nil — пачки нет.

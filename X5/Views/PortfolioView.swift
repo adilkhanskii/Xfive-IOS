@@ -1133,7 +1133,8 @@ private struct EditPortfolioItemView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var title: String
     @State private var description: String
-    @State private var newCover: UIImage?
+    /// Новая обложка: состояние у экрана, окно галереи — на корне экрана (см. SystemPhotoPicker).
+    @StateObject private var coverPick = PortfolioCoverPick()
     @State private var saving = false
     @State private var errorText: String?
 
@@ -1156,7 +1157,7 @@ private struct EditPortfolioItemView: View {
                     // Вместо подсказки про «монтаж» (его нет) — смена обложки видео.
                     Section {
                         PortfolioCoverPickerRow(
-                            cover: $newCover,
+                            pick: coverPick,
                             currentCoverURL: item.hasVideoCover
                                 ? item.signedThumbnailUrl.flatMap { URL(string: $0) }
                                 : nil,
@@ -1190,9 +1191,14 @@ private struct EditPortfolioItemView: View {
                     } label: {
                         if saving { ProgressView() } else { Text("Сохранить").bold() }
                     }
-                    .disabled(saving)
+                    // Пока выбранная обложка грузится, сохранять нельзя: иначе ушёл бы
+                    // только текст, а обложка «не поменялась бы» (Адильхан 10.10 20:11).
+                    .disabled(saving || coverPick.loading)
                 }
             }
+        }
+        .x5SinglePhotoPicker(isPresented: $coverPick.showingPicker) { provider in
+            coverPick.load(provider)
         }
     }
 
@@ -1203,40 +1209,74 @@ private struct EditPortfolioItemView: View {
         let cleanDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
         if await onSave(cleanTitle.isEmpty ? nil : cleanTitle,
                         cleanDescription.isEmpty ? nil : cleanDescription,
-                        newCover) != nil {
+                        coverPick.cover) != nil {
             X5Feedback.success()
             dismiss()
         } else {
             X5Feedback.error()
-            errorText = newCover == nil
+            errorText = coverPick.cover == nil
                 ? "Не удалось сохранить."
                 : "Не удалось сохранить обложку. Проверьте интернет и попробуйте ещё раз."
         }
     }
 }
 
+/// Новая обложка видео, которую выбирают в галерее. Живёт у экрана, а не у строки
+/// Form: строку Form пересобирает после Face ID, и её состояние терялось бы вместе
+/// с окном галереи (Адильхан 10.10 13:58, 18:01, 20:11).
+@MainActor
+final class PortfolioCoverPick: ObservableObject {
+    @Published var cover: UIImage?
+    @Published var showingPicker = false
+    @Published private(set) var loading = false
+    @Published private(set) var errorText: String?
+    /// Номер последнего выбора: результат старой загрузки не ставим.
+    private var pickID = 0
+
+    func load(_ provider: NSItemProvider) {
+        pickID += 1
+        let id = pickID
+        loading = true
+        errorText = nil
+        Task {
+            do {
+                let prepared = try await PickedPhotoLoader.loadPrepared(from: provider)
+                guard id == pickID else { return }
+                cover = prepared.preview
+            } catch {
+                guard id == pickID else { return }
+                errorText = PickedPhotoLoader.errorText
+            }
+            loading = false
+        }
+    }
+
+    func reset() {
+        pickID += 1
+        cover = nil
+        loading = false
+        errorText = nil
+    }
+}
+
 /// Выбор обложки видео из галереи (Адильхан 09.10: «ставить обложку для видео»).
-/// Одна строка Form: обе кнопки .borderless и одна галерея на строку — иначе
-/// в Form тап срабатывает на всех кнопках строки и галерея «моргает» (как было в CourseUP).
+/// Только показ и кнопки: окно галереи висит на корне экрана (`.x5SinglePhotoPicker`
+/// с `pick.showingPicker`), а не на этой строке Form.
 private struct PortfolioCoverPickerRow: View {
-    @Binding var cover: UIImage?
+    @ObservedObject var pick: PortfolioCoverPick
     /// Обложка с сервера — показываем, пока не выбрали новую.
     let currentCoverURL: URL?
     /// Кадр из видео, который станет обложкой, если свою не выбрать.
     let fallbackFrame: UIImage?
 
-    @State private var showingPicker = false
-    @State private var loading = false
-    @State private var errorText: String?
-
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Button {
-                showingPicker = true
+                pick.showingPicker = true
             } label: {
                 ZStack {
                     Color.white.opacity(0.06)
-                    if let cover {
+                    if let cover = pick.cover {
                         Image(uiImage: cover).resizable().scaledToFill()
                     } else if let currentCoverURL {
                         CachedAsyncImage(url: currentCoverURL) { image in
@@ -1251,7 +1291,7 @@ private struct PortfolioCoverPickerRow: View {
                             .font(.system(size: 28, weight: .light))
                             .foregroundColor(.white.opacity(0.6))
                     }
-                    if loading {
+                    if pick.loading {
                         Color.black.opacity(0.4)
                         ProgressView().tint(.white)
                     }
@@ -1261,40 +1301,24 @@ private struct PortfolioCoverPickerRow: View {
                 .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.borderless)
-            .disabled(loading)
+            .disabled(pick.loading)
             .frame(maxWidth: .infinity)
 
             Button {
-                showingPicker = true
+                pick.showingPicker = true
             } label: {
-                Label(cover == nil ? "Выбрать обложку из галереи" : "Заменить обложку",
+                Label(pick.cover == nil ? "Выбрать обложку из галереи" : "Заменить обложку",
                       systemImage: "photo.on.rectangle")
             }
             .buttonStyle(.borderless)
-            .disabled(loading)
+            .disabled(pick.loading)
 
-            if let errorText {
+            if let errorText = pick.errorText {
                 Text(errorText)
                     .font(.footnote)
                     .foregroundColor(.red)
             }
         }
-        // Галерея через UIKit: SwiftUI-шная перезапускалась при перерисовке (Адильхан 10.10).
-        .x5SinglePhotoPicker(isPresented: $showingPicker) { provider in
-            Task { await load(provider) }
-        }
-    }
-
-    private func load(_ provider: NSItemProvider) async {
-        loading = true
-        errorText = nil
-        do {
-            let prepared = try await PickedPhotoLoader.loadPrepared(from: provider)
-            cover = prepared.preview
-        } catch {
-            errorText = PickedPhotoLoader.errorText
-        }
-        loading = false
     }
 }
 
@@ -1311,15 +1335,15 @@ struct AddPortfolioItemView: View {
     let onSave: (Data, String, String, String, Data?, Bool, String?, String?) async -> Bool
 
     @Environment(\.dismiss) private var dismiss
-    // Галерея через UIKit (X5PhotoPickerPresenter): SwiftUI-шная в строке Form после
+    // Галерея — SystemPhotoPicker на корне экрана: SwiftUI-шная в строке Form после
     // Face ID закрывалась и открывалась по кругу (Адильхан 10.10).
     @State private var showingMediaPicker = false
     @State private var mediaData: Data?
     @State private var videoThumbnailData: Data?
     /// Кадр из видео — обложка по умолчанию.
     @State private var videoCoverFrame: UIImage?
-    /// Обложка, которую автор выбрал сам.
-    @State private var pickedCover: UIImage?
+    /// Обложка, которую автор выбрал сам (окно галереи — на корне экрана).
+    @StateObject private var coverPick = PortfolioCoverPick()
     @State private var mediaType: String = "image"
     @State private var mime: String = "image/jpeg"
     @State private var ext: String = "jpg"
@@ -1342,7 +1366,7 @@ struct AddPortfolioItemView: View {
                                     .font(.system(size: 15, weight: .semibold))
                             }
                             .frame(maxWidth: .infinity, minHeight: 160)
-                        } else if mediaType == "video", let image = pickedCover ?? videoCoverFrame {
+                        } else if mediaType == "video", let image = coverPick.cover ?? videoCoverFrame {
                             // Показываем обложку, а не служебную сетку кадров.
                             ZStack {
                                 Image(uiImage: image)
@@ -1377,28 +1401,12 @@ struct AddPortfolioItemView: View {
                         }
                     }
                     .disabled(preparingMedia)
-                    .x5PhotoPicker(
-                        isPresented: $showingMediaPicker,
-                        limit: 1,
-                        filter: .any(of: [.images, .videos])
-                    ) { providers in
-                        guard let provider = providers.first else { return }
-                        mediaPreparationGeneration += 1
-                        let generation = mediaPreparationGeneration
-                        preparingMedia = true
-                        mediaData = nil
-                        videoThumbnailData = nil
-                        videoCoverFrame = nil
-                        pickedCover = nil
-                        errorText = nil
-                        Task { await loadMedia(provider, generation: generation) }
-                    }
                 }
 
                 if mediaType == "video", mediaData != nil {
                     Section {
                         PortfolioCoverPickerRow(
-                            cover: $pickedCover,
+                            pick: coverPick,
                             currentCoverURL: nil,
                             fallbackFrame: videoCoverFrame
                         )
@@ -1434,9 +1442,29 @@ struct AddPortfolioItemView: View {
                     } label: {
                         if saving { ProgressView() } else { Text("Сохранить").bold() }
                     }
-                    .disabled(saving || preparingMedia || mediaData == nil)
+                    .disabled(saving || preparingMedia || mediaData == nil || coverPick.loading)
                 }
             }
+        }
+        // Обе галереи — на корне экрана, не на строках Form (см. SystemPhotoPicker).
+        .x5PhotoPicker(
+            isPresented: $showingMediaPicker,
+            limit: 1,
+            filter: .any(of: [.images, .videos])
+        ) { providers in
+            guard let provider = providers.first else { return }
+            mediaPreparationGeneration += 1
+            let generation = mediaPreparationGeneration
+            preparingMedia = true
+            mediaData = nil
+            videoThumbnailData = nil
+            videoCoverFrame = nil
+            coverPick.reset()
+            errorText = nil
+            Task { await loadMedia(provider, generation: generation) }
+        }
+        .x5SinglePhotoPicker(isPresented: $coverPick.showingPicker) { provider in
+            coverPick.load(provider)
         }
     }
 
@@ -1470,7 +1498,7 @@ struct AddPortfolioItemView: View {
         guard mediaType == "video", let sheetData = videoThumbnailData else {
             return (videoThumbnailData, false)
         }
-        if let cover = pickedCover ?? videoCoverFrame,
+        if let cover = coverPick.cover ?? videoCoverFrame,
            let composed = PortfolioVideoCover.compose(cover: cover, frameSheet: UIImage(data: sheetData)) {
             return (composed, true)
         }

@@ -261,7 +261,9 @@ class XFiveMarketingHomeSourceTests(unittest.TestCase):
         self.assertIn("HomeSearchSheet", home)
         self.assertIn("searchable(text: $query", home)
         self.assertIn("GeneratedGalleryView()", home)
-        self.assertIn('accessibilityLabel("Поиск инструментов")', home)
+        # 10.10 20:11 Адильхан: «раздел поиска можно убрать» — кнопки поиска в шапке нет.
+        self.assertNotIn('accessibilityLabel("Поиск инструментов")', home)
+        self.assertNotIn('Image(systemName: "magnifyingglass")', home)
         self.assertIn('accessibilityLabel(loc.t("gen_gallery"))', home)
         self.assertIn('Label("Еще", systemImage: "chevron.right")', home)
         self.assertIn("handle(.videoGeneration)", home)

@@ -60,8 +60,8 @@ class ReleaseVersionSourceTests(unittest.TestCase):
         # перетаскивание карточек курсов в каталоге);
         # 09.10 вечер: TestFlight 252 (вторая пачка правок Адильхана); App Store-ревью пока остаётся на 251.
         # 10.10: TestFlight 253 (галочка: задания первым; запрет записи экрана в курсах).
-        # 10.10 вечером: TestFlight 256 (все галереи через UIKit, правка комментария на месте, значки Hub, альбомы в чате).
-        self.assertEqual(runtime_build_number, "256")
+        # 10.10 вечером: TestFlight 257 (обложка видео меняется, галерея на корне экрана, размеры Nano Banana, без поиска).
+        self.assertEqual(runtime_build_number, "257")
         self.assertEqual(fastlane_version, marketing_version)
         self.assertIn(
             f"Version {marketing_version} build 251",

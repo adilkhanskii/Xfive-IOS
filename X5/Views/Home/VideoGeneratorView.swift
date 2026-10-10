@@ -143,7 +143,7 @@ struct VideoGeneratorView: View {
     @State private var recentJobs: [VideoGenerationJob] = []
     @State private var errorMessage: String?
     @State private var isSubmitting = false
-    // Галерея через UIKit (X5PhotoPickerPresenter): SwiftUI-шная после Face ID
+    // Галерея — SystemPhotoPicker на корне экрана: SwiftUI-шная после Face ID
     // закрывалась и открывалась по кругу (Адильхан 10.10).
     @State private var showingStartImagePicker = false
     @State private var startImagePreview: UIImage?

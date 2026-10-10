@@ -99,14 +99,9 @@ struct HomeView: View {
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button {
-                        showingSearch = true
-                    } label: {
-                        Image(systemName: "magnifyingglass")
-                    }
-                    .accessibilityIdentifier("x5.home.search")
-                    .accessibilityLabel("Поиск инструментов")
-
+                    // Кнопку поиска убрали (Адильхан 10.10 20:11: «раздел поиска можно убрать»;
+                    // в поиске были дубли на английском — Post, Insta Pack, Product…).
+                    // идея: вернуть — кнопка с showingSearch = true, окно HomeSearchSheet ниже осталось.
                     Button {
                         showingGeneratedGallery = true
                     } label: {

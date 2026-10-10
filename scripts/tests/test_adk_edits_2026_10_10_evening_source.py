@@ -13,15 +13,15 @@ def read(path: Path) -> str:
 class AdilkhanEdits20261010EveningSourceTests(unittest.TestCase):
     """Адильхан 10.10 18:01–18:30: галерея снова мигает, «склейка» в плитке, комментарии, значки Hub."""
 
-    def test_photo_gallery_is_presented_by_uikit_not_by_a_form_row(self):
+    def test_photo_gallery_is_not_presented_from_a_form_row(self):
         # Строка Form пересобирается после Face ID → SwiftUI снимал и снова
-        # показывал галерею. Теперь её показывает UIKit поверх верхнего экрана.
+        # показывал галерею. 20:30: показ через UIKit (255–256) мог залипнуть —
+        # теперь обычный .sheet, но только на корне экрана (см. night-тест).
         loader = read(VIEWS / "Helpers" / "PickedPhotoLoader.swift")
-        self.assertIn("presenter.present(picker, animated: true)", loader)
+        self.assertIn("struct SystemPhotoPicker: UIViewControllerRepresentable", loader)
         self.assertIn("isPresented.wrappedValue = false", loader)
         self.assertIn("configuration.selectionLimit = max(1, limit)", loader)
-        self.assertNotIn("struct SystemPhotoPicker", loader)
-        self.assertNotIn("sheet(isPresented: isPresented)", loader)
+        self.assertNotIn("X5PhotoPickerPresenter", loader)
 
     def test_cover_references_use_the_uikit_gallery(self):
         generator = read(VIEWS / "Home" / "ImageGeneratorView.swift")
