@@ -182,7 +182,8 @@ class XFiveMarketingHomeSourceTests(unittest.TestCase):
         self.assertNotIn('Image("HomeSalesBannerFeature")', home)
         self.assertNotIn("salesLabel(", home)
         self.assertIn('Text("Карточки\\nтоваров")', home)
-        self.assertIn('handle(imageAction("product_cards"))', home)
+        # 10.10 (Адильхан): большая «Карточки товаров» снова ведёт в «Продающие баннеры».
+        self.assertIn('handle(imageAction("target_ad"))', home)
 
     def test_sales_banner_is_immediately_after_ai_influencer_before_tiles(self):
         home = HOME.read_text(encoding="utf-8")

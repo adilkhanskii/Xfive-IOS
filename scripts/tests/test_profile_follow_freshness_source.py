@@ -14,7 +14,8 @@ class ProfileFollowFreshnessSourceTests(unittest.TestCase):
         self.assertIn(".refreshable { await refreshProfile() }", source)
         self.assertIn("@Environment(\\.scenePhase) private var scenePhase", source)
         self.assertIn(".task(id: scenePhase)", source)
-        self.assertIn("guard scenePhase == .active else { return }", source)
+        # 10.10: только после настоящего фона (не после галереи/Face ID).
+        self.assertIn("guard scenePhase == .active, wasInBackground else { return }", source)
         self.assertIn("await refreshFollowCounts()", source)
 
     def test_public_profile_refreshes_counts_on_pull_and_foreground(self):

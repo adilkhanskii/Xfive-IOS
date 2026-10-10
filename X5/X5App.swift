@@ -18,6 +18,13 @@ struct X5App: App {
     @StateObject private var iap: IAPService
 
     @Environment(\.scenePhase) private var scenePhase
+    /// Было ли приложение именно в фоне (а не просто «неактивно»).
+    /// Зачем (Адильхан 10.10, видео: галерея мигает, снова просит Face ID, фото не выбирается):
+    /// системная галерея и запрос Face ID делают приложение «неактивным» на секунду.
+    /// Раньше каждое возвращение в «активно» перезагружало профиль и покупки —
+    /// весь экран перерисовывался, галерея перезапускалась, и так по кругу.
+    /// Теперь обновляемся только после настоящего ухода в фон.
+    @State private var returnedFromBackground = false
 
     init() {
         // Build 67: install crash + lifecycle reporter BEFORE any other init.
@@ -55,7 +62,9 @@ struct X5App: App {
                     await syncStoreKitAndProfile(source: "auth")
                 }
                 .onChange(of: scenePhase) { phase in
-                    guard phase == .active else { return }
+                    if phase == .background { returnedFromBackground = true }
+                    guard phase == .active, returnedFromBackground else { return }
+                    returnedFromBackground = false
                     syncPushRegistrationIfNeeded()
                     // `UserProfile.isPro` evaluates the server expiration against
                     // the current time. Re-evaluate the cached profile every time

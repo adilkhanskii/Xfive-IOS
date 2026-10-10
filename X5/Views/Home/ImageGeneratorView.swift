@@ -20,8 +20,13 @@ struct ImageGeneratorView: View {
     @State private var selectedQuantity = 1
     @State private var selectedSize: ImageGenerationSize = .square
     @State private var showingGallery = false
-    @State private var mainPhotoItem: PhotosPickerItem?
-    @State private var logoItem: PhotosPickerItem?
+    // «Фото героя» / «Основная фотография» и логотип — через галерею UIKit
+    // (SystemPhotoPicker): SwiftUI-шная перезапускалась при перерисовке экрана (Адильхан 10.10).
+    @State private var showingMainPhotoPicker = false
+    @State private var showingLogoPicker = false
+    /// Номер последнего выбора по слоту: результат старой загрузки не ставим.
+    @State private var mainPhotoPickID = 0
+    @State private var logoPickID = 0
     @State private var referenceItems: [PhotosPickerItem] = []
     @State private var mainPhoto: ImageReferenceAsset?
     @State private var logoImage: ImageReferenceAsset?
@@ -129,14 +134,11 @@ struct ImageGeneratorView: View {
         .onChange(of: referenceItems) { newItems in
             Task { await loadReferenceImages(newItems) }
         }
-        .onChange(of: mainPhotoItem) { newItem in
-            // nil — это наш сброс выбора после загрузки, а не «убрать фото».
-            guard let newItem else { return }
-            Task { await loadSinglePhoto(newItem, slot: .main) }
+        .x5SinglePhotoPicker(isPresented: $showingMainPhotoPicker) { provider in
+            Task { await loadSinglePhoto(provider, slot: .main) }
         }
-        .onChange(of: logoItem) { newItem in
-            guard let newItem else { return }
-            Task { await loadSinglePhoto(newItem, slot: .logo) }
+        .x5SinglePhotoPicker(isPresented: $showingLogoPicker) { provider in
+            Task { await loadSinglePhoto(provider, slot: .logo) }
         }
         .onChange(of: selectedProvider) { provider in
             if !selectedSize.isSupported(by: provider) {
@@ -613,7 +615,7 @@ struct ImageGeneratorView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.white.opacity(0.72))
 
-                PhotosPicker(selection: $mainPhotoItem, matching: .images) {
+                Button { showingMainPhotoPicker = true } label: {
                     uploadSlot(
                         title: "Основная фотография",
                         subtitle: mainPhoto == nil ? "Товар, услуга или человек" : "Фотография добавлена",
@@ -625,7 +627,7 @@ struct ImageGeneratorView: View {
                 .buttonStyle(.plain)
                 .disabled(isGenerating || isLoadingReferences || isLoadingMainPhoto)
 
-                PhotosPicker(selection: $logoItem, matching: .images) {
+                Button { showingLogoPicker = true } label: {
                     uploadSlot(
                         title: "Логотип",
                         subtitle: logoImage == nil ? "Разместим аккуратно в макете" : "Логотип добавлен",
@@ -652,7 +654,7 @@ struct ImageGeneratorView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.white.opacity(0.72))
 
-                PhotosPicker(selection: $mainPhotoItem, matching: .images) {
+                Button { showingMainPhotoPicker = true } label: {
                     uploadSlot(
                         title: "Фото героя",
                         subtitle: mainPhoto == nil ? "Лицо или главный персонаж ролика" : "Фото героя добавлено",
@@ -1436,33 +1438,45 @@ struct ImageGeneratorView: View {
     }
 
     /// «Фото героя» / «Основная фотография» / логотип.
-    private func loadSinglePhoto(_ item: PhotosPickerItem, slot: SinglePhotoSlot) async {
+    private func loadSinglePhoto(_ provider: NSItemProvider, slot: SinglePhotoSlot) async {
         photoLoadError = nil
-        switch slot {
-        case .main: isLoadingMainPhoto = true
-        case .logo: isLoadingLogo = true
-        }
-        let asset = await loadReferenceImage(item)
-
-        // Пока грузилось, могли выбрать другое фото — старый результат не ставим.
-        let isStillCurrent: Bool
-        switch slot {
-        case .main: isStillCurrent = mainPhotoItem == item
-        case .logo: isStillCurrent = logoItem == item
-        }
-        guard isStillCurrent else { return }
-
+        let pickID: Int
         switch slot {
         case .main:
+            mainPhotoPickID += 1
+            pickID = mainPhotoPickID
+            isLoadingMainPhoto = true
+        case .logo:
+            logoPickID += 1
+            pickID = logoPickID
+            isLoadingLogo = true
+        }
+
+        var asset: ImageReferenceAsset?
+        do {
+            let prepared = try await PickedPhotoLoader.loadPrepared(from: provider, maxPixelSize: 1536)
+            asset = ImageReferenceAsset(
+                id: "picked-\(UUID().uuidString)",
+                image: prepared.preview,
+                reference: ImageGenerationReference(
+                    mimeType: "image/jpeg",
+                    base64: prepared.jpeg.base64EncodedString()
+                )
+            )
+        } catch {
+            photoLoadError = PickedPhotoLoader.errorText
+        }
+
+        // Пока грузилось, могли выбрать другое фото — старый результат не ставим.
+        switch slot {
+        case .main:
+            guard pickID == mainPhotoPickID else { return }
             if let asset { mainPhoto = asset }
             isLoadingMainPhoto = false
-            // Сброс выбора: иначе то же фото второй раз не выбрать —
-            // onChange не срабатывает на одинаковое значение.
-            mainPhotoItem = nil
         case .logo:
+            guard pickID == logoPickID else { return }
             if let asset { logoImage = asset }
             isLoadingLogo = false
-            logoItem = nil
         }
     }
 

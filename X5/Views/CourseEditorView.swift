@@ -77,7 +77,6 @@ struct CourseEditorView: View {
     @State private var coverUrl: String?
     @State private var categories: [EditableCategory] = [.defaultContent()]
 
-    @State private var coverItem: PhotosPickerItem?
     @State private var coverPreviewData: Data?
     // Готовая картинка для показа: раньше UIImage(data:) декодировал полное
     // фото с камеры при КАЖДОЙ перерисовке формы → редактор «жестко тупил».
@@ -262,10 +261,10 @@ struct CourseEditorView: View {
                     authorName = defaultAuthorName
                 }
             }
-            .photosPicker(isPresented: $showingCoverPicker, selection: $coverItem, matching: .images)
-            .onChange(of: coverItem) { newValue in
-                guard let newValue else { return }
-                Task { await loadCoverPreview(newValue) }
+            // Галерея через UIKit: SwiftUI-шная перезапускалась при перерисовке экрана
+            // и снова просила Face ID (Адильхан 09–10.10, «баг как в CourseUP при загрузке фото»).
+            .x5SinglePhotoPicker(isPresented: $showingCoverPicker) { provider in
+                Task { await loadCoverPreview(provider) }
             }
             // Удаление модуля — только после явного «Удалить». Раньше тап по
             // строке модуля мог сам нажать «Удалить модуль» (см. lessonsSection).
@@ -569,22 +568,20 @@ struct CourseEditorView: View {
         }
     }
 
-    private func loadCoverPreview(_ item: PhotosPickerItem) async {
+    private func loadCoverPreview(_ provider: NSItemProvider) async {
         // Раньше: try? + молчаливый return → «выбрал фото, а обложка не поменялась».
         // Теперь общий загрузчик (Data → файл, ужатие вне главного потока),
         // спиннер на карточке и текст ошибки.
         loadingCoverPreview = true
         coverPickError = nil
         do {
-            let prepared = try await PickedPhotoLoader.loadPrepared(from: item)
+            let prepared = try await PickedPhotoLoader.loadPrepared(from: provider)
             coverPreviewData = prepared.jpeg
             coverPreviewImage = prepared.preview
         } catch {
             coverPickError = PickedPhotoLoader.errorText
         }
         loadingCoverPreview = false
-        // Сброс выбора: иначе то же фото второй раз не выбрать — onChange молчит.
-        if coverItem == item { coverItem = nil }
     }
 
     private func save() async {
@@ -1239,7 +1236,6 @@ private struct LessonEditorSheet: View {
     /// Готовая картинка новой обложки — чтобы не декодировать JPEG в body.
     @State private var pendingThumbnailImage: UIImage?
     @State private var showingVideoPicker = false
-    @State private var thumbnailItem: PhotosPickerItem?
     // Один флаг на одну галерею обложки: раньше в строке Form стояли два
     // PhotosPicker, и тап по строке открывал оба → галерея «моргала» 2 раза.
     @State private var showingThumbnailPicker = false
@@ -1370,7 +1366,9 @@ private struct LessonEditorSheet: View {
                 }
             }
             // Галерея обложки показывается только отсюда — одна презентация на весь экран.
-            .photosPicker(isPresented: $showingThumbnailPicker, selection: $thumbnailItem, matching: .images)
+            .x5SinglePhotoPicker(isPresented: $showingThumbnailPicker) { provider in
+                Task { await importThumbnail(provider) }
+            }
             .task {
                 // Урок открыли повторно до сохранения курса: обложка уже выбрана,
                 // готовим картинку для показа один раз.
@@ -1378,10 +1376,6 @@ private struct LessonEditorSheet: View {
                 pendingThumbnailImage = await Task.detached(priority: .userInitiated) {
                     UIImage(data: data)
                 }.value
-            }
-            .onChange(of: thumbnailItem) { newValue in
-                guard let newValue else { return }
-                Task { await importThumbnail(newValue) }
             }
             .sheet(isPresented: $showingVideoPicker, onDismiss: {
                 uploading = false
@@ -1459,9 +1453,6 @@ private struct LessonEditorSheet: View {
                     Button(role: .destructive) {
                         pendingThumbnailData = nil
                         pendingThumbnailImage = nil
-                        // Сброс выбора: иначе то же фото повторно не выбрать —
-                        // onChange(of: thumbnailItem) не сработает.
-                        thumbnailItem = nil
                         thumbnailUrl = ""
                     } label: {
                         Label("Убрать", systemImage: "trash")
@@ -1538,19 +1529,15 @@ private struct LessonEditorSheet: View {
         }
     }
 
-    private func importThumbnail(_ item: PhotosPickerItem) async {
+    private func importThumbnail(_ provider: NSItemProvider) async {
         uploadingThumbnail = true
-        defer {
-            uploadingThumbnail = false
-            // Сброс выбора: иначе то же фото второй раз не выбрать — onChange молчит.
-            if thumbnailItem == item { thumbnailItem = nil }
-        }
+        defer { uploadingThumbnail = false }
         errorText = nil
 
         // Общий загрузчик с генератором обложек: Data → запасной путь через файл,
         // ужатие до 1600 px вне главного потока (см. PickedPhotoLoader).
         do {
-            let prepared = try await PickedPhotoLoader.loadPrepared(from: item)
+            let prepared = try await PickedPhotoLoader.loadPrepared(from: provider)
             pendingThumbnailData = prepared.jpeg
             pendingThumbnailImage = prepared.preview
         } catch {

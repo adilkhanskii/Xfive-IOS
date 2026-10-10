@@ -267,11 +267,11 @@ struct HomeView: View {
                     .accessibilityIdentifier("x5.home.business.ai_influencer")
                 }
 
-                // Большая «Карточки товаров» открывает генератор карточек (как на сайте).
-                // Раньше вела в «Продающие баннеры», а сами карточки были на маленькой плитке,
-                // которую Адильхан попросил убрать 09.10 — иначе карточки остались бы только в трендах.
+                // Большая «Карточки товаров» снова ведёт в «Продающие баннеры» — как до 09.10.
+                // 09.10 переключили на генератор карточек, но Адильхан 10.10: «интерфейс
+                // поменялся, до этого топ был». Генератор карточек остаётся в трендах (Wildberries) и поиске.
                 NativeHomeSalesBannerCard(
-                    action: { handle(imageAction("product_cards")) }
+                    action: { handle(imageAction("target_ad")) }
                 )
                 .accessibilityIdentifier("x5.home.business.sales_banners")
 
@@ -933,6 +933,10 @@ private struct NativeHomeBusinessCard: View {
             .frame(maxWidth: .infinity)
             .frame(height: cardHeight)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            // Зона нажатия = видимая карточка. clipShape обрезает только картинку,
+            // а нажатия ловит вся растянутая scaledToFill-картинка. Широкая «Обложки YouTube»
+            // перекрывала «Карточки товаров» сверху, и тап открывал обложки (Адильхан 10.10).
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(Color.white.opacity(0.16), lineWidth: 1)
@@ -1020,6 +1024,8 @@ private struct NativeHomeVoiceCard: View {
             .frame(maxWidth: .infinity)
             .frame(height: HomeLayout.voicePromoHeight)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            // Та же причина, что у плиток выше: нажатия только по видимой карточке.
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(Color.white.opacity(0.14), lineWidth: 1)

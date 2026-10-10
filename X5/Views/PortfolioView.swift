@@ -241,69 +241,76 @@ private struct PortfolioGridCell: View {
 
     var body: some View {
         Button(action: onOpen) {
-            ZStack {
-                Color.white.opacity(0.055)
-
-                if item.type == "video" {
-                    // Раньше плитка видео была чёрной: превью видео — это сетка
-                    // кадров для автопроверки, её не показывали. Теперь — обложка.
-                    PortfolioVideoTileCover(item: item)
-                    Image(systemName: "play.circle.fill")
-                        .font(.system(size: 30, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.92))
-                        .shadow(color: .black.opacity(0.45), radius: 6)
-                } else if let s = imageURLString, let url = URL(string: s) {
-                    CachedAsyncImage(url: url) { image in
-                        image.resizable().scaledToFill()
-                    } placeholder: {
-                        ProgressView().tint(.white.opacity(0.5))
-                    }
-                } else {
-                    Image(systemName: "photo")
-                        .font(.system(size: 24, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.42))
-                }
-
-                LinearGradient(
-                    colors: [.clear, .black.opacity(0.48)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-
-                VStack {
-                    HStack {
-                        if item.needsModerationBadge {
-                            PortfolioModerationBadge(item: item)
-                        }
-                        if isPinned {
-                            Image(systemName: "pin.fill")
-                                .font(.system(size: 12, weight: .black))
-                                .foregroundColor(.white)
-                                .padding(6)
-                                .background(.ultraThinMaterial)
-                                .clipShape(Circle())
-                        }
-                        Spacer()
-                        // Второй значок ▶ в углу убран (Адильхан 09.10): хватает
-                        // одного большого по центру.
-                    }
-                    Spacer()
-                    if let title = item.title, !title.isEmpty {
-                        Text(title)
-                            .font(.system(size: 11, weight: .heavy))
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .shadow(color: .black.opacity(0.7), radius: 4, x: 0, y: 2)
-                    }
-                }
-                .padding(7)
-            }
-            .aspectRatio(3 / 4, contentMode: .fit)
-            .clipped()
-            .contentShape(Rectangle())
+            // Размер плитки задаёт пустой фон 3:4, а картинка — наложение поверх.
+            // Раньше картинка сама была внутри ZStack и раздувала плитку: у видео
+            // с обложкой превью высокое (обложка + кадры снизу), и плитка
+            // растягивалась на весь экран — обложка сверху, кадры снизу (Адильхан 10.10).
+            Color.white.opacity(0.055)
+                .aspectRatio(3 / 4, contentMode: .fit)
+                .overlay { tileContent }
+                .clipped()
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    private var tileContent: some View {
+        ZStack {
+            if item.type == "video" {
+                // Раньше плитка видео была чёрной: превью видео — это сетка
+                // кадров для автопроверки, её не показывали. Теперь — обложка.
+                PortfolioVideoTileCover(item: item)
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.92))
+                    .shadow(color: .black.opacity(0.45), radius: 6)
+            } else if let s = imageURLString, let url = URL(string: s) {
+                CachedAsyncImage(url: url) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: {
+                    ProgressView().tint(.white.opacity(0.5))
+                }
+            } else {
+                Image(systemName: "photo")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.42))
+            }
+
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.48)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            VStack {
+                HStack {
+                    if item.needsModerationBadge {
+                        PortfolioModerationBadge(item: item)
+                    }
+                    if isPinned {
+                        Image(systemName: "pin.fill")
+                            .font(.system(size: 12, weight: .black))
+                            .foregroundColor(.white)
+                            .padding(6)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Circle())
+                    }
+                    Spacer()
+                    // Второй значок ▶ в углу убран (Адильхан 09.10): хватает
+                    // одного большого по центру.
+                }
+                Spacer()
+                if let title = item.title, !title.isEmpty {
+                    Text(title)
+                        .font(.system(size: 11, weight: .heavy))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .shadow(color: .black.opacity(0.7), radius: 4, x: 0, y: 2)
+                }
+            }
+            .padding(7)
+        }
     }
 
     private var imageURLString: String? {
@@ -1067,7 +1074,6 @@ private struct PortfolioCoverPickerRow: View {
     /// Кадр из видео, который станет обложкой, если свою не выбрать.
     let fallbackFrame: UIImage?
 
-    @State private var pickerItem: PhotosPickerItem?
     @State private var showingPicker = false
     @State private var loading = false
     @State private var errorText: String?
@@ -1125,25 +1131,22 @@ private struct PortfolioCoverPickerRow: View {
                     .foregroundColor(.red)
             }
         }
-        .photosPicker(isPresented: $showingPicker, selection: $pickerItem, matching: .images)
-        .onChange(of: pickerItem) { newValue in
-            guard let newValue else { return }
-            Task { await load(newValue) }
+        // Галерея через UIKit: SwiftUI-шная перезапускалась при перерисовке (Адильхан 10.10).
+        .x5SinglePhotoPicker(isPresented: $showingPicker) { provider in
+            Task { await load(provider) }
         }
     }
 
-    private func load(_ item: PhotosPickerItem) async {
+    private func load(_ provider: NSItemProvider) async {
         loading = true
         errorText = nil
         do {
-            let prepared = try await PickedPhotoLoader.loadPrepared(from: item)
+            let prepared = try await PickedPhotoLoader.loadPrepared(from: provider)
             cover = prepared.preview
         } catch {
             errorText = PickedPhotoLoader.errorText
         }
         loading = false
-        // Сброс выбора: иначе то же фото повторно не выбрать.
-        if pickerItem == item { pickerItem = nil }
     }
 }
 

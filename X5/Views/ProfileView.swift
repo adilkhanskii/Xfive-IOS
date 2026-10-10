@@ -23,6 +23,10 @@ struct ProfileView: View {
     @State private var savingShowInHub = false
     @State private var selectedSection: ProfileSection = .overview
     @State private var followCounts: ProfileFollowCounts?
+    /// Счётчики обновляем только после настоящего фона, не после «неактивно»:
+    /// галерея и Face ID на секунду делают приложение неактивным, и перерисовка
+    /// профиля перезапускала галерею при выборе обложки (Адильхан 10.10).
+    @State private var wasInBackground = false
 
     private let followService = ProfileFollowService()
 
@@ -113,7 +117,9 @@ struct ProfileView: View {
             // notification. Refresh whenever the app returns to the foreground;
             // SwiftUI cancels this task automatically when the view disappears.
             .task(id: scenePhase) {
-                guard scenePhase == .active else { return }
+                if scenePhase == .background { wasInBackground = true }
+                guard scenePhase == .active, wasInBackground else { return }
+                wasInBackground = false
                 await refreshFollowCounts()
             }
             .onReceive(

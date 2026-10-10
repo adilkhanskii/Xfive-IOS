@@ -30,17 +30,16 @@ class IOSCourseClientUISourceTests(unittest.TestCase):
             encoding="utf-8"
         )
 
+        # 10.10: галерея обложек — UIKit (SystemPhotoPicker), одна презентация на экран.
         self.assertNotIn("PhotosPicker(selection: $thumbnailItem", editor)
         self.assertEqual(
-            editor.count(
-                ".photosPicker(isPresented: $showingThumbnailPicker, selection: $thumbnailItem"
-            ),
+            editor.count(".x5SinglePhotoPicker(isPresented: $showingThumbnailPicker)"),
             1,
         )
         # Обложка курса — тот же приём: без PhotosPicker внутри строки Form.
         self.assertNotIn("PhotosPicker(selection: $coverItem", editor)
         self.assertEqual(
-            editor.count(".photosPicker(isPresented: $showingCoverPicker, selection: $coverItem"),
+            editor.count(".x5SinglePhotoPicker(isPresented: $showingCoverPicker)"),
             1,
         )
 
@@ -102,7 +101,7 @@ class IOSCourseClientUISourceTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertGreaterEqual(editor.count("CourseCoverImage.prepare("), 1)
-        self.assertGreaterEqual(editor.count("PickedPhotoLoader.loadPrepared(from: item)"), 2)
+        self.assertGreaterEqual(editor.count("PickedPhotoLoader.loadPrepared(from: provider)"), 2)
         self.assertIn("CourseCoverImage.prepare(data, maxPixelSize: maxPixelSize)", loader)
 
     def test_picked_photos_never_fail_silently_and_can_be_picked_again(self):
@@ -122,10 +121,11 @@ class IOSCourseClientUISourceTests(unittest.TestCase):
         self.assertIn("loadTransferable(type: PickedImageFile.self)", loader)
         self.assertIn("FileRepresentation(contentType: .image)", loader)
         self.assertIn("coverPickError = PickedPhotoLoader.errorText", editor)
-        self.assertIn("if coverItem == item { coverItem = nil }", editor)
-        self.assertIn("if thumbnailItem == item { thumbnailItem = nil }", editor)
+        # 10.10: галерея UIKit отдаёт новый выбор каждый раз — сбрасывать нечего.
+        self.assertNotIn("coverItem", editor)
+        self.assertNotIn("thumbnailItem", editor)
         self.assertIn("photoLoadError = PickedPhotoLoader.errorText", generator)
-        self.assertIn("mainPhotoItem = nil", generator)
+        self.assertIn("guard pickID == mainPhotoPickID else { return }", generator)
         self.assertIn("isLoading: isLoadingMainPhoto", generator)
 
     def test_courseup_header_and_every_real_course_have_developer_editor_action(self):
