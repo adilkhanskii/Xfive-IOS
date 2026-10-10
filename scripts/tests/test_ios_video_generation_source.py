@@ -101,13 +101,10 @@ class IOSVideoGenerationSourceTests(unittest.TestCase):
 
         self.assertIn("import PhotosUI", view)
         self.assertIn("import UIKit", view)
-        self.assertIn("PhotosPicker(selection: $startImageItem, matching: .images)", view)
-        self.assertIn("FileRepresentation", view)
-        self.assertRegex(
-            view,
-            r"loadTransferable\s*\(\s*"
-            r"type:\s*VideoGenerationPickedImageFile\.self\s*\)",
-        )
+        # 10.10: галерея UIKit (SwiftUI-шная после Face ID открывалась по кругу);
+        # фото по-прежнему приходит файлом, а не Data.
+        self.assertIn(".x5SinglePhotoPicker(isPresented: $showingStartImagePicker)", view)
+        self.assertIn("PickedPhotoLoader.copyImageFile(", view)
         self.assertIn("Task.detached", view)
         self.assertIn("CGImageSourceCreateThumbnailAtIndex", view)
         self.assertNotIn("loadTransferable(type: Data.self)", view)

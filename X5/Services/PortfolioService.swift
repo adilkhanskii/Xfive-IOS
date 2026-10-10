@@ -152,12 +152,17 @@ struct PortfolioComment: Codable, Identifiable, Equatable {
     var userAvatar: String? = nil
     let text: String
     let createdAt: String?
+    /// Когда автор изменил текст (ставит сервер, миграция 20261010190000). nil — не меняли.
+    var editedAt: String? = nil
+
+    var isEdited: Bool { editedAt != nil }
 
     enum CodingKeys: String, CodingKey {
         case id, text
         case itemId = "portfolio_id"
         case userId = "user_id"
         case createdAt = "created_at"
+        case editedAt = "edited_at"
     }
 }
 
@@ -654,7 +659,9 @@ final class PortfolioService: ObservableObject {
         guard var components = URLComponents(url: baseURL.appendingPathComponent("rest/v1/portfolio_comments"), resolvingAgainstBaseURL: false) else { return [] }
         components.queryItems = [
             URLQueryItem(name: "portfolio_id", value: "eq.\(itemId)"),
-            URLQueryItem(name: "select", value: "id,portfolio_id,user_id,text,created_at"),
+            // «*», а не список колонок: edited_at появился миграцией 20261010190000 —
+            // так комментарии грузятся и до, и после неё.
+            URLQueryItem(name: "select", value: "*"),
             URLQueryItem(name: "order", value: "created_at.asc")
         ]
         guard let reqURL = components.url else { return [] }
@@ -764,25 +771,34 @@ final class PortfolioService: ObservableObject {
         return !rows.isEmpty
     }
 
-    /// Изменить свой комментарий. В проде у `portfolio_comments` нет права UPDATE
-    /// (только читать, добавлять и удалять своё), поэтому без миграции БД:
-    /// сначала новый комментарий, потом удаляем старый. Если старый не удалился —
-    /// убираем новый, чтобы не было дубля. Изменённый комментарий встаёт в конец.
-    /// идея: политика UPDATE (own) в БД — тогда правка на месте, порядок не меняется.
+    /// Изменить свой комментарий на месте (миграция 20261010190000: политика
+    /// owner_update_comment + триггер, который меняет только text и ставит edited_at).
+    /// Порядок комментариев не меняется. Чужое RLS молча пропустит (204) — поэтому
+    /// просим строку назад и считаем изменённым, только если она вернулась.
     func editComment(_ comment: PortfolioComment, newText: String, accessToken: String) async -> PortfolioComment? {
-        guard let updated = await addComment(
-            itemId: comment.itemId,
-            userId: comment.userId,
-            userName: comment.userName,
-            userAvatar: comment.userAvatar,
-            text: newText,
-            accessToken: accessToken
-        ) else { return nil }
-        if await deleteComment(commentId: comment.id, accessToken: accessToken) {
-            return updated
-        }
-        _ = await deleteComment(commentId: updated.id, accessToken: accessToken)
-        return nil
+        guard var components = URLComponents(url: baseURL.appendingPathComponent("rest/v1/portfolio_comments"), resolvingAgainstBaseURL: false) else { return nil }
+        components.queryItems = [
+            URLQueryItem(name: "id", value: "eq.\(comment.id)"),
+            URLQueryItem(name: "select", value: "*")
+        ]
+        guard let reqURL = components.url else { return nil }
+        var request = URLRequest(url: reqURL)
+        request.httpMethod = "PATCH"
+        request.setValue(anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("return=representation", forHTTPHeaderField: "Prefer")
+        let body: [String: AnyEncodable] = ["text": AnyEncodable(String(newText.prefix(1000)))]
+        request.httpBody = try? JSONEncoder().encode(body)
+        guard let (data, response) = try? await session.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode),
+              let rows = try? JSONDecoder().decode([PortfolioComment].self, from: data),
+              var updated = rows.first
+        else { return nil }
+        updated.userName = comment.userName
+        updated.userAvatar = comment.userAvatar
+        return updated
     }
 
     func delete(itemId: String, accessToken: String) async {

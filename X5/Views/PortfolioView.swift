@@ -890,6 +890,10 @@ private struct PortfolioInstagramPostPage: View {
                             .font(.system(size: 13))
                             .foregroundColor(.white)
                         HStack(spacing: 14) {
+                            if comment.isEdited {
+                                Text("изменено")
+                                    .foregroundColor(.white.opacity(0.36))
+                            }
                             Button("Ответить") {
                                 editingComment = nil
                                 commentDraft = "@\(commentAuthorName(comment)) "
@@ -1055,9 +1059,10 @@ private struct PortfolioInstagramPostPage: View {
                 return
             }
             if let updated = await onEditComment(editing, text) {
-                // Сервер не умеет править на месте — новый комментарий встаёт в конец.
-                comments.removeAll { $0.id == editing.id }
-                comments.append(updated)
+                // Правка на месте: комментарий остаётся на своём месте в списке.
+                if let index = comments.firstIndex(where: { $0.id == editing.id }) {
+                    comments[index] = updated
+                }
                 editingComment = nil
                 commentDraft = ""
                 X5Feedback.success()
@@ -1306,7 +1311,9 @@ struct AddPortfolioItemView: View {
     let onSave: (Data, String, String, String, Data?, Bool, String?, String?) async -> Bool
 
     @Environment(\.dismiss) private var dismiss
-    @State private var mediaItem: PhotosPickerItem?
+    // Галерея через UIKit (X5PhotoPickerPresenter): SwiftUI-шная в строке Form после
+    // Face ID закрывалась и открывалась по кругу (Адильхан 10.10).
+    @State private var showingMediaPicker = false
     @State private var mediaData: Data?
     @State private var videoThumbnailData: Data?
     /// Кадр из видео — обложка по умолчанию.
@@ -1327,7 +1334,7 @@ struct AddPortfolioItemView: View {
         NavigationStack {
             Form {
                 Section {
-                    PhotosPicker(selection: $mediaItem, matching: .any(of: [.images, .videos])) {
+                    Button { showingMediaPicker = true } label: {
                         if preparingMedia {
                             VStack(spacing: 10) {
                                 ProgressView()
@@ -1369,16 +1376,22 @@ struct AddPortfolioItemView: View {
                             .frame(maxWidth: .infinity, minHeight: 100)
                         }
                     }
-                    .onChange(of: mediaItem) { newValue in
+                    .disabled(preparingMedia)
+                    .x5PhotoPicker(
+                        isPresented: $showingMediaPicker,
+                        limit: 1,
+                        filter: .any(of: [.images, .videos])
+                    ) { providers in
+                        guard let provider = providers.first else { return }
                         mediaPreparationGeneration += 1
                         let generation = mediaPreparationGeneration
-                        preparingMedia = newValue != nil
+                        preparingMedia = true
                         mediaData = nil
                         videoThumbnailData = nil
                         videoCoverFrame = nil
                         pickedCover = nil
                         errorText = nil
-                        Task { await loadMedia(newValue, generation: generation) }
+                        Task { await loadMedia(provider, generation: generation) }
                     }
                 }
 
@@ -1476,13 +1489,8 @@ struct AddPortfolioItemView: View {
         return resized.jpegData(compressionQuality: 0.82) ?? data
     }
 
-    private func loadMedia(_ item: PhotosPickerItem?, generation: Int) async {
-        guard let item else {
-            guard generation == mediaPreparationGeneration else { return }
-            preparingMedia = false
-            return
-        }
-        guard let data = try? await item.loadTransferable(type: Data.self) else {
+    private func loadMedia(_ provider: NSItemProvider, generation: Int) async {
+        guard let picked = try? await PickedPhotoLoader.loadMedia(from: provider) else {
             guard generation == mediaPreparationGeneration else { return }
             preparingMedia = false
             errorText = "Не удалось подготовить выбранный файл."
@@ -1490,10 +1498,10 @@ struct AddPortfolioItemView: View {
         }
         guard generation == mediaPreparationGeneration else { return }
 
-        let contentType = item.supportedContentTypes.first
-        if item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) || $0.conforms(to: .video) }) {
-            let videoMime = contentType?.preferredMIMEType ?? "video/quicktime"
-            let videoExtension = contentType?.preferredFilenameExtension ?? "mov"
+        let data = picked.data
+        if picked.isVideo {
+            let videoMime = picked.mimeType
+            let videoExtension = picked.fileExtension
             let thumbnail = await makeVideoThumbnail(from: data, fileExtension: videoExtension)
             guard generation == mediaPreparationGeneration else { return }
             mediaType = "video"

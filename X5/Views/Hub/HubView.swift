@@ -900,6 +900,17 @@ private struct CategoryTile: View {
         !title.contains(" ") && !title.contains("-")
     }
 
+    /// Шрифт под самое длинное слово: в плитку (iPhone 375–430 pt, 4 в ряд) влезает
+    /// ~9 букв по 10.5 pt. Длиннее («Мобилография», «Видеооператор») — шрифт меньше,
+    /// чтобы слово не рвалось по буквам и не вылезало за края (Адильхан 10.10 18:30).
+    private var titleFontSize: CGFloat {
+        let longest = title
+            .split(whereSeparator: { $0 == " " || $0 == "-" || $0 == "/" })
+            .map(\.count)
+            .max() ?? 0
+        return longest > 9 ? max(8, 10.5 * 9 / CGFloat(longest)) : 10.5
+    }
+
     var body: some View {
         VStack(spacing: 7) {
             Image(systemName: systemImage)
@@ -907,7 +918,7 @@ private struct CategoryTile: View {
                 .foregroundColor(isSelected ? .black : .white.opacity(0.74))
                 .frame(height: 26)
             Text(title)
-                .font(.system(size: 10.5, weight: .heavy))
+                .font(.system(size: titleFontSize, weight: .heavy))
                 .foregroundColor(isSelected ? .black : .white)
                 .multilineTextAlignment(.center)
                 // Одно длинное слово («Видеооператор», «Корреспондент») не переносится

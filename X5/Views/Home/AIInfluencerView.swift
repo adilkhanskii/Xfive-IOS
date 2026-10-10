@@ -74,7 +74,9 @@ struct AIInfluencerView: View {
     @State private var imageProvider = ImageGenerationProvider.gptImage2
     @State private var imageFormat = CharacterImageFormat.portrait
     @State private var imageQuality = CharacterImageQuality.standard
-    @State private var referenceItem: PhotosPickerItem?
+    // Галерея через UIKit (X5PhotoPickerPresenter): SwiftUI-шная после Face ID
+    // закрывалась и открывалась по кругу (Адильхан 10.10).
+    @State private var showingReferencePicker = false
     @State private var referenceImage: UIImage?
     @State private var referenceData: Data?
     @State private var confirmsImageRights = false
@@ -122,8 +124,8 @@ struct AIInfluencerView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .task { await loadCapabilities() }
-        .onChange(of: referenceItem) { item in
-            Task { await loadReference(item) }
+        .x5SinglePhotoPicker(isPresented: $showingReferencePicker) { provider in
+            Task { await loadReference(provider) }
         }
         .onChange(of: imageProvider) { provider in
             if provider != .nanoBanana2 { imageQuality = .standard }
@@ -246,7 +248,7 @@ struct AIInfluencerView: View {
             field("Аксессуары", text: $accessories, lines: 2)
             field("Дополнительные детали", text: $extra, lines: 3)
 
-            PhotosPicker(selection: $referenceItem, matching: .images) {
+            Button { showingReferencePicker = true } label: {
                 HStack(spacing: 10) {
                     if let referenceImage {
                         Image(uiImage: referenceImage)
@@ -625,9 +627,8 @@ struct AIInfluencerView: View {
         X5Feedback.selection()
     }
 
-    private func loadReference(_ item: PhotosPickerItem?) async {
-        guard let item,
-              let data = try? await item.loadTransferable(type: Data.self),
+    private func loadReference(_ provider: NSItemProvider) async {
+        guard let data = try? await PickedPhotoLoader.loadData(from: provider),
               let image = UIImage(data: data),
               let jpeg = image.jpegData(compressionQuality: 0.84),
               jpeg.count <= ImageGenerationReferencePolicy.maximumDecodedBytesPerImage

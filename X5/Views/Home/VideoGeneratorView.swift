@@ -7,25 +7,6 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-private struct VideoGenerationPickedImageFile: Transferable {
-    let url: URL
-
-    static var transferRepresentation: some TransferRepresentation {
-        FileRepresentation(contentType: .image) { image in
-            SentTransferredFile(image.url)
-        } importing: { received in
-            let sourceExtension = received.file.pathExtension
-            let filename = "x5-video-start-\(UUID().uuidString)"
-                + (sourceExtension.isEmpty ? "" : ".\(sourceExtension)")
-            let copyURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent(filename, isDirectory: false)
-            try? FileManager.default.removeItem(at: copyURL)
-            try FileManager.default.copyItem(at: received.file, to: copyURL)
-            return Self(url: copyURL)
-        }
-    }
-}
-
 private enum VideoGenerationPhotoSaveError: LocalizedError {
     case permissionDenied
     case saveFailed
@@ -162,7 +143,9 @@ struct VideoGeneratorView: View {
     @State private var recentJobs: [VideoGenerationJob] = []
     @State private var errorMessage: String?
     @State private var isSubmitting = false
-    @State private var startImageItem: PhotosPickerItem?
+    // Галерея через UIKit (X5PhotoPickerPresenter): SwiftUI-шная после Face ID
+    // закрывалась и открывалась по кругу (Адильхан 10.10).
+    @State private var showingStartImagePicker = false
     @State private var startImagePreview: UIImage?
     @State private var startImage: VideoGenerationStartImage?
     @State private var isPreparingStartImage = false
@@ -279,8 +262,8 @@ struct VideoGeneratorView: View {
                     restoreTask = nil
                 }
             }
-            .onChange(of: startImageItem) { item in
-                beginStartImagePreparation(item)
+            .x5SinglePhotoPicker(isPresented: $showingStartImagePicker) { provider in
+                beginStartImagePreparation(provider)
             }
             .onChange(of: currentJob?.resultURL) { _ in
                 beginResultPreparation(currentJob)
@@ -432,7 +415,7 @@ struct VideoGeneratorView: View {
                     .foregroundColor(.white.opacity(0.34))
             }
 
-            PhotosPicker(selection: $startImageItem, matching: .images) {
+            Button { showingStartImagePicker = true } label: {
                 HStack(spacing: 10) {
                     if isPreparingStartImage {
                         ProgressView()
@@ -471,7 +454,6 @@ struct VideoGeneratorView: View {
                         photoPreparationTask = nil
                         photoPreparationID = UUID()
                         isPreparingStartImage = false
-                        self.startImageItem = nil
                         self.startImagePreview = nil
                         self.startImage = nil
                     } label: {
@@ -830,7 +812,7 @@ struct VideoGeneratorView: View {
         durationSeconds == 10 ? 1_200 : 650
     }
 
-    private func beginStartImagePreparation(_ item: PhotosPickerItem?) {
+    private func beginStartImagePreparation(_ item: NSItemProvider?) {
         photoPreparationTask?.cancel()
         photoPreparationTask = nil
         let preparationID = UUID()
@@ -1070,18 +1052,19 @@ struct VideoGeneratorView: View {
     }
 
     private func loadStartImage(
-        _ item: PhotosPickerItem,
+        _ item: NSItemProvider,
         preparationID: UUID,
         lifecycleID sessionID: UUID
     ) async {
         do {
-            guard let pickedFile = try await item.loadTransferable(
-                type: VideoGenerationPickedImageFile.self
+            guard let pickedURL = try? await PickedPhotoLoader.copyImageFile(
+                from: item,
+                prefix: "x5-video-start"
             ) else {
                 throw VideoGenerationServiceError.invalidStartImage
             }
             let jpegData = try await VideoGenerationStartImagePreparer.prepareJPEG(
-                fileURL: pickedFile.url
+                fileURL: pickedURL
             )
             try Task.checkCancellation()
             guard isPhotoPreparationCurrent(
@@ -1147,7 +1130,6 @@ struct VideoGeneratorView: View {
         lifecycleID = UUID()
         isSubmitting = false
         isPreparingStartImage = false
-        startImageItem = nil
         startImagePreview = nil
         startImage = nil
         currentJob = nil

@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 // MARK: - Models
 
@@ -259,7 +260,15 @@ enum HubCategories {
         }
     }
 
+    /// Значок категории. Если такого SF Symbol на этой iOS нет — общий значок,
+    /// а не пустая плитка (так было с «Бухгалтер», Адильхан 10.10 18:30).
+    /// Все имена проверяет XCTest HubCategorySymbolTests на симуляторе в CI.
     static func symbol(for id: String?) -> String {
+        let name = rawSymbol(for: id)
+        return UIImage(systemName: name) != nil ? name : "square.grid.2x2.fill"
+    }
+
+    static func rawSymbol(for id: String?) -> String {
         switch id {
         case "marketing": return "megaphone.fill"
         case "smm": return "iphone"

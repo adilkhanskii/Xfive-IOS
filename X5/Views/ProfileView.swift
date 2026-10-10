@@ -15,7 +15,9 @@ struct ProfileView: View {
     @State private var showingVerified = false
     @State private var showingSettings = false
     @State private var showingEdit = false
-    @State private var avatarPickerItem: PhotosPickerItem?
+    // Галерея через UIKit (X5PhotoPickerPresenter): SwiftUI-шная после Face ID
+    // закрывалась и открывалась по кругу (Адильхан 10.10).
+    @State private var showingAvatarPicker = false
     @State private var uploadingAvatar = false
     @State private var avatarError: String?
     @State private var isRefreshing = false
@@ -69,7 +71,7 @@ struct ProfileView: View {
                             dismiss()
                         }
                     } else {
-                        PhotosPicker(selection: $avatarPickerItem, matching: .images) {
+                        Button { showingAvatarPicker = true } label: {
                             Image(systemName: uploadingAvatar ? "hourglass" : "camera.fill")
                                 .font(.system(size: 20, weight: .semibold))
                         }
@@ -99,10 +101,9 @@ struct ProfileView: View {
             } message: {
                 Text(avatarError ?? "")
             }
-            .onChange(of: avatarPickerItem) { newItem in
-                guard let item = newItem else { return }
+            .x5SinglePhotoPicker(isPresented: $showingAvatarPicker) { provider in
                 X5Feedback.selection()
-                Task { await uploadAvatar(item) }
+                Task { await uploadAvatar(provider) }
             }
             .onChange(of: currentUser.profile?.showInHub) { value in
                 if !savingShowInHub {
@@ -303,16 +304,15 @@ struct ProfileView: View {
         }
     }
 
-    private func uploadAvatar(_ item: PhotosPickerItem) async {
+    private func uploadAvatar(_ provider: NSItemProvider) async {
         guard let profileOperation = currentUser.operationContext() else { return }
         guard let token = await auth.freshAccessToken() else {
             avatarError = "Сессия устарела. Войди заново и попробуй еще раз."
-            avatarPickerItem = nil
             return
         }
         uploadingAvatar = true
         defer { uploadingAvatar = false }
-        if let data = try? await item.loadTransferable(type: Data.self),
+        if let data = try? await PickedPhotoLoader.loadData(from: provider),
            let image = UIImage(data: data),
            let jpeg = image.jpegData(compressionQuality: 0.85) {
             let url = await currentUser.uploadAvatar(jpeg, accessToken: token, operation: profileOperation)
@@ -326,7 +326,6 @@ struct ProfileView: View {
             X5Feedback.error()
             avatarError = "Не удалось прочитать фото."
         }
-        avatarPickerItem = nil
     }
 
     // MARK: - Stats

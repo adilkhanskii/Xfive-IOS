@@ -223,6 +223,29 @@ extension PickedPhotoLoader {
         return PickedMedia(data: try await loadData(from: provider), contentType: imageType)
     }
 
+    /// Копия фото из галереи UIKit во временный файл (видео-генератор готовит JPEG
+    /// из файла). Файл системы живёт только внутри замыкания — копируем сразу там.
+    static func copyImageFile(from provider: NSItemProvider, prefix: String) async throws -> URL {
+        let type = UTType.image.identifier
+        guard provider.hasItemConformingToTypeIdentifier(type) else { throw LoadError.unreadable }
+        let copied: URL? = await withCheckedContinuation { continuation in
+            provider.loadFileRepresentation(forTypeIdentifier: type) { url, _ in
+                guard let url else { continuation.resume(returning: nil); return }
+                let ext = url.pathExtension
+                let copyURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("\(prefix)-\(UUID().uuidString)" + (ext.isEmpty ? "" : ".\(ext)"))
+                do {
+                    try FileManager.default.copyItem(at: url, to: copyURL)
+                    continuation.resume(returning: copyURL)
+                } catch {
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
+        guard let copied else { throw LoadError.unreadable }
+        return copied
+    }
+
     /// Байты фото из галереи UIKit: сначала файлом (надёжнее для HEIC и iCloud),
     /// потом как Data. Файл системы живёт только внутри замыкания — читаем сразу там.
     static func loadData(from provider: NSItemProvider) async throws -> Data {
