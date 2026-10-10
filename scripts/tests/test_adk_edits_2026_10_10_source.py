@@ -22,8 +22,9 @@ class AdilkhanEdits20261010SourceTests(unittest.TestCase):
 
     def test_single_photo_pickers_use_the_uikit_picker(self):
         loader = read(VIEWS / "Helpers" / "PickedPhotoLoader.swift")
-        self.assertIn("struct SystemPhotoPicker: UIViewControllerRepresentable", loader)
-        self.assertIn("configuration.selectionLimit = 1", loader)
+        # 10.10 вечером: галерею показывает сам UIKit (см. test_adk_edits_2026_10_10_evening).
+        self.assertIn("enum X5PhotoPickerPresenter", loader)
+        self.assertIn("x5PhotoPicker(isPresented: isPresented, limit: 1)", loader)
         self.assertIn("static func loadPrepared(\n        from provider: NSItemProvider", loader)
 
         portfolio = read(VIEWS / "PortfolioView.swift")

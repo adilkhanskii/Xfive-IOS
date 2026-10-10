@@ -896,6 +896,10 @@ private struct CategoryTile: View {
     let count: Int
     let isSelected: Bool
 
+    private var isSingleWord: Bool {
+        !title.contains(" ") && !title.contains("-")
+    }
+
     var body: some View {
         VStack(spacing: 7) {
             Image(systemName: systemImage)
@@ -906,8 +910,11 @@ private struct CategoryTile: View {
                 .font(.system(size: 10.5, weight: .heavy))
                 .foregroundColor(isSelected ? .black : .white)
                 .multilineTextAlignment(.center)
-                .lineLimit(3)
-                .minimumScaleFactor(0.68)
+                // Одно длинное слово («Видеооператор», «Корреспондент») не переносится
+                // и вылезало за края плитки (Адильхан 10.10 18:30) — ужимаем в строку.
+                .lineLimit(isSingleWord ? 1 : 3)
+                .minimumScaleFactor(isSingleWord ? 0.6 : 0.68)
+                .padding(.horizontal, 5)
             if count > 0 {
                 Text("\(count)")
                     .font(.system(size: 10, weight: .heavy))

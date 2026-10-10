@@ -1,6 +1,7 @@
 import CoreTransferable
 import PhotosUI
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 /// Загрузка фото из системной галереи (PhotosPicker). Один путь для генератора
@@ -78,67 +79,108 @@ struct PickedImageFile: Transferable {
     }
 }
 
-// MARK: - Галерея через UIKit (одно фото)
+// MARK: - Галерея через UIKit
 
-/// Системная галерея (PHPickerViewController) для одного фото.
+/// Системная галерея (PHPickerViewController), которую показывает сам UIKit —
+/// поверх самого верхнего экрана, мимо SwiftUI.
 ///
-/// Зачем (Адильхан 10.10, видео: обложка в портфолио и «Фото героя»): галерея
-/// мигала, сама перезапускалась («Загрузка…»), снова просила Face ID, и фото
-/// не выбиралось. SwiftUI-шный PhotosPicker пересоздаёт галерею, когда экран
-/// под ней перерисовывается. Здесь галерея создаётся один раз и на перерисовки
-/// не реагирует (updateUIViewController пустой).
+/// Зачем (Адильхан 10.10, видео 13:58 и 18:01–18:05): галерея открывалась,
+/// сама закрывалась и открывалась снова, опять просила Face ID, фото не выбиралось.
+/// Причина: `.sheet`/`.photosPicker` висели на строке Form/ленивого списка. Face ID
+/// и галерея меняют безопасные отступы → Form пересобирает строки → SwiftUI
+/// снимает окно галереи и, раз флаг ещё true, показывает заново. По кругу.
+/// Сборка 254 убрала только перезагрузку профиля, а пересборка строк осталась.
+/// Здесь SwiftUI о галерее не знает: перерисовки её не трогают.
 /// Доступ к медиатеке не нужен: PHPickerConfiguration без photoLibrary.
-/// идея: перевести сюда и референсы (несколько фото), если баг вернётся там.
-struct SystemPhotoPicker: UIViewControllerRepresentable {
-    /// nil — закрыли галерею без выбора.
-    let onPick: (NSItemProvider?) -> Void
+@MainActor
+enum X5PhotoPickerPresenter {
+    /// Открытая галерея. Держим делегат, пока она не закроется (у picker он weak).
+    private static var active: PickerDelegate?
 
-    func makeUIViewController(context: Context) -> PHPickerViewController {
+    /// limit — сколько фото можно выбрать. onPick получает [] при закрытии без выбора.
+    static func present(limit: Int, onPick: @escaping ([NSItemProvider]) -> Void) {
+        // Второй тап, пока галерея открыта, игнорируем — иначе две галереи подряд.
+        guard active == nil, let presenter = topViewController() else { return }
         var configuration = PHPickerConfiguration()
         configuration.filter = .images
-        configuration.selectionLimit = 1
+        configuration.selectionLimit = max(1, limit)
         configuration.preferredAssetRepresentationMode = .current
         let picker = PHPickerViewController(configuration: configuration)
-        picker.delegate = context.coordinator
-        return picker
+        let delegate = PickerDelegate { providers in
+            active = nil
+            onPick(providers)
+        }
+        picker.delegate = delegate
+        picker.presentationController?.delegate = delegate
+        active = delegate
+        presenter.present(picker, animated: true)
     }
 
-    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {
-        // Нарочно пусто: перерисовка экрана не должна трогать открытую галерею.
-        context.coordinator.onPick = onPick
+    private static func topViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        let window = scene?.windows.first(where: \.isKeyWindow) ?? scene?.windows.first
+        var top = window?.rootViewController
+        while let next = top?.presentedViewController, !next.isBeingDismissed {
+            top = next
+        }
+        return top
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(onPick: onPick) }
-
-    final class Coordinator: NSObject, PHPickerViewControllerDelegate {
-        var onPick: (NSItemProvider?) -> Void
+    private final class PickerDelegate: NSObject, PHPickerViewControllerDelegate,
+        UIAdaptivePresentationControllerDelegate {
+        private let finish: ([NSItemProvider]) -> Void
         private var finished = false
 
-        init(onPick: @escaping (NSItemProvider?) -> Void) {
-            self.onPick = onPick
+        init(finish: @escaping ([NSItemProvider]) -> Void) {
+            self.finish = finish
         }
 
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            picker.dismiss(animated: true)
+            complete(results.map(\.itemProvider))
+        }
+
+        /// Закрыли свайпом вниз — галерея могла не вызвать didFinishPicking.
+        func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+            complete([])
+        }
+
+        private func complete(_ providers: [NSItemProvider]) {
             // Делегат может прийти дважды (выбор + закрытие) — берём первый.
             guard !finished else { return }
             finished = true
-            onPick(results.first?.itemProvider)
+            finish(providers)
         }
     }
 }
 
+// @MainActor: галерею можно показывать только из главного потока.
+@MainActor
 extension View {
-    /// Галерея для одного фото поверх экрана. Сама закрывается после выбора.
+    /// Галерея для одного фото. Флаг сразу сбрасываем: дальше галереей владеет UIKit,
+    /// и перерисовка экрана её уже не закроет и не откроет заново.
     func x5SinglePhotoPicker(
         isPresented: Binding<Bool>,
         onPick: @escaping (NSItemProvider) -> Void
     ) -> some View {
-        sheet(isPresented: isPresented) {
-            SystemPhotoPicker { provider in
-                isPresented.wrappedValue = false
-                if let provider { onPick(provider) }
+        x5PhotoPicker(isPresented: isPresented, limit: 1) { providers in
+            if let provider = providers.first { onPick(provider) }
+        }
+    }
+
+    /// Галерея на несколько фото (референсы). onPick не зовём, если ничего не выбрали.
+    func x5PhotoPicker(
+        isPresented: Binding<Bool>,
+        limit: Int,
+        onPick: @escaping ([NSItemProvider]) -> Void
+    ) -> some View {
+        onChange(of: isPresented.wrappedValue) { show in
+            guard show else { return }
+            isPresented.wrappedValue = false
+            X5PhotoPickerPresenter.present(limit: limit) { providers in
+                if !providers.isEmpty { onPick(providers) }
             }
-            .ignoresSafeArea()
         }
     }
 }

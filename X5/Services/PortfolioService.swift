@@ -743,6 +743,48 @@ final class PortfolioService: ObservableObject {
         return created
     }
 
+    /// Удалить свой комментарий (Адильхан 10.10 18:03: «комент не редактируется,
+    /// не удаляется»). RLS прода (mig_portfolio.mjs, owner_delete_comment) даёт
+    /// удалять только своё; чужое PostgREST молча пропустит с кодом 204, поэтому
+    /// просим строки назад и считаем удалённым, только если строка вернулась.
+    func deleteComment(commentId: String, accessToken: String) async -> Bool {
+        guard var components = URLComponents(url: baseURL.appendingPathComponent("rest/v1/portfolio_comments"), resolvingAgainstBaseURL: false) else { return false }
+        components.queryItems = [URLQueryItem(name: "id", value: "eq.\(commentId)")]
+        guard let reqURL = components.url else { return false }
+        var request = URLRequest(url: reqURL)
+        request.httpMethod = "DELETE"
+        request.setValue(anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("return=representation", forHTTPHeaderField: "Prefer")
+        guard let (data, response) = try? await session.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode),
+              let rows = try? JSONDecoder().decode([PortfolioComment].self, from: data)
+        else { return false }
+        return !rows.isEmpty
+    }
+
+    /// Изменить свой комментарий. В проде у `portfolio_comments` нет права UPDATE
+    /// (только читать, добавлять и удалять своё), поэтому без миграции БД:
+    /// сначала новый комментарий, потом удаляем старый. Если старый не удалился —
+    /// убираем новый, чтобы не было дубля. Изменённый комментарий встаёт в конец.
+    /// идея: политика UPDATE (own) в БД — тогда правка на месте, порядок не меняется.
+    func editComment(_ comment: PortfolioComment, newText: String, accessToken: String) async -> PortfolioComment? {
+        guard let updated = await addComment(
+            itemId: comment.itemId,
+            userId: comment.userId,
+            userName: comment.userName,
+            userAvatar: comment.userAvatar,
+            text: newText,
+            accessToken: accessToken
+        ) else { return nil }
+        if await deleteComment(commentId: comment.id, accessToken: accessToken) {
+            return updated
+        }
+        _ = await deleteComment(commentId: updated.id, accessToken: accessToken)
+        return nil
+    }
+
     func delete(itemId: String, accessToken: String) async {
         guard var components = URLComponents(url: baseURL.appendingPathComponent("rest/v1/portfolio_items"), resolvingAgainstBaseURL: false) else { return }
         components.queryItems = [URLQueryItem(name: "id", value: "eq.\(itemId)")]

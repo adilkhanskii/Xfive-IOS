@@ -293,7 +293,9 @@ enum HubCategories {
         case "ai_ml": return "brain.head.profile"
         case "gamedev": return "gamecontroller.fill"
         case "consulting": return "briefcase.fill"
-        case "accountant": return "calculator.fill"
+        // Было "calculator.fill" — такого значка в iOS нет, плитка «Бухгалтер»
+        // была пустой (Адильхан 10.10 18:30). ± — как клавиша калькулятора.
+        case "accountant": return "plus.forwardslash.minus"
         case "finance": return "chart.line.uptrend.xyaxis"
         case "legal": return "scalemass.fill"
         case "hr": return "person.2.fill"

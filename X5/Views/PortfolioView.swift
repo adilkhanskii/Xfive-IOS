@@ -200,6 +200,15 @@ struct PortfolioGrid: View {
                                                     userAvatar: nil,
                                                     text: text,
                                                     accessToken: token)
+                },
+                currentUserId: auth.userId,
+                onEditComment: { comment, text in
+                    guard let token = await auth.freshAccessToken() else { return nil }
+                    return await service.editComment(comment, newText: text, accessToken: token)
+                },
+                onDeleteComment: { comment in
+                    guard let token = await auth.freshAccessToken() else { return false }
+                    return await service.deleteComment(commentId: comment.id, accessToken: token)
                 }
             )
             .preferredColorScheme(.dark)
@@ -335,10 +344,7 @@ private struct PortfolioVideoTileCover: View {
             Color.black.opacity(0.42)
             if item.hasVideoCover, let s = item.signedThumbnailUrl, let url = URL(string: s) {
                 CachedAsyncImage(url: url) { image in
-                    image
-                        .resizable()
-                        .scaledToFill()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    PortfolioCoverTopCrop(image: image)
                 } placeholder: {
                     Color.clear
                 }
@@ -355,6 +361,25 @@ private struct PortfolioVideoTileCover: View {
             else { return }
             videoFrame = await PortfolioVideoFrameCache.shared.frame(itemId: item.id, videoURL: url)
         }
+    }
+}
+
+/// Верх склейки «обложка 3:4 + кадры» на весь размер рамки.
+/// Зачем (Адильхан 10.10 18:01, скрин «тоже баг»): было `.scaledToFill()` +
+/// `.frame(maxHeight: .infinity, alignment: .top)` — длинная картинка растягивала
+/// рамку до своей высоты, и плитка показывала середину: низ обложки + кадры видео.
+/// Color.clear берёт ровно размер плитки, картинка прижата к верху, низ обрезается.
+struct PortfolioCoverTopCrop: View {
+    let image: Image
+
+    var body: some View {
+        Color.clear
+            .overlay(alignment: .top) {
+                image
+                    .resizable()
+                    .scaledToFill()
+            }
+            .clipped()
     }
 }
 
@@ -504,6 +529,10 @@ private struct PortfolioInstagramViewer: View {
     let onSetSaved: (PortfolioItem, Bool) async -> Bool
     let onLoadComments: (PortfolioItem) async -> [PortfolioComment]
     let onAddComment: (PortfolioItem, String) async -> PortfolioComment?
+    /// Кто смотрит: свои комментарии можно изменить и удалить.
+    let currentUserId: String?
+    let onEditComment: (PortfolioComment, String) async -> PortfolioComment?
+    let onDeleteComment: (PortfolioComment) async -> Bool
 
     @Environment(\.dismiss) private var dismiss
 
@@ -528,7 +557,10 @@ private struct PortfolioInstagramViewer: View {
                                 onLoadSaved: { await onLoadSaved(item) },
                                 onSetSaved: { saved in await onSetSaved(item, saved) },
                                 onLoadComments: { await onLoadComments(item) },
-                                onAddComment: { text in await onAddComment(item, text) }
+                                onAddComment: { text in await onAddComment(item, text) },
+                                currentUserId: currentUserId,
+                                onEditComment: onEditComment,
+                                onDeleteComment: onDeleteComment
                             )
                             .id(item.id)
                             .frame(width: UIScreen.main.bounds.width)
@@ -572,8 +604,15 @@ private struct PortfolioInstagramPostPage: View {
     let onSetSaved: (Bool) async -> Bool
     let onLoadComments: () async -> [PortfolioComment]
     let onAddComment: (String) async -> PortfolioComment?
+    let currentUserId: String?
+    let onEditComment: (PortfolioComment, String) async -> PortfolioComment?
+    let onDeleteComment: (PortfolioComment) async -> Bool
 
     @State private var likeState = PortfolioLikeState(isLiked: false, count: 0)
+    /// Свой комментарий, который сейчас правим в поле ввода (nil — пишем новый).
+    @State private var editingComment: PortfolioComment?
+    /// Свой комментарий, для которого открыт вопрос «Удалить?».
+    @State private var commentToDelete: PortfolioComment?
     @State private var comments: [PortfolioComment] = []
     @State private var commentDraft = ""
     @State private var busyLike = false
@@ -850,14 +889,39 @@ private struct PortfolioInstagramPostPage: View {
                         Text(comment.text)
                             .font(.system(size: 13))
                             .foregroundColor(.white)
-                        Button("Ответить") {
-                            commentDraft = "@\(commentAuthorName(comment)) "
-                            commentFieldFocused = true
+                        HStack(spacing: 14) {
+                            Button("Ответить") {
+                                editingComment = nil
+                                commentDraft = "@\(commentAuthorName(comment)) "
+                                commentFieldFocused = true
+                            }
+                            // Свой комментарий: кнопки видно сразу, без долгого нажатия —
+                            // Адильхан не нашёл, как изменить или удалить (10.10 18:03).
+                            if isOwnComment(comment) {
+                                Button("Изменить") { startEditing(comment) }
+                                Button("Удалить") { commentToDelete = comment }
+                            }
                         }
+                        .buttonStyle(.borderless)
                         .font(.system(size: 11, weight: .bold))
                         .foregroundColor(.white.opacity(0.48))
                     }
                     Spacer()
+                }
+                .contentShape(Rectangle())
+                .contextMenu {
+                    if isOwnComment(comment) {
+                        Button {
+                            startEditing(comment)
+                        } label: {
+                            Label("Изменить", systemImage: "pencil")
+                        }
+                        Button(role: .destructive) {
+                            commentToDelete = comment
+                        } label: {
+                            Label("Удалить", systemImage: "trash")
+                        }
+                    }
                 }
             }
             if let commentError {
@@ -867,6 +931,47 @@ private struct PortfolioInstagramPostPage: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .confirmationDialog(
+            "Удалить комментарий?",
+            isPresented: Binding(
+                get: { commentToDelete != nil },
+                set: { if !$0 { commentToDelete = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: commentToDelete
+        ) { comment in
+            Button("Удалить", role: .destructive) {
+                Task { await deleteComment(comment) }
+            }
+            Button("Отмена", role: .cancel) {}
+        }
+    }
+
+    private func isOwnComment(_ comment: PortfolioComment) -> Bool {
+        guard let currentUserId else { return false }
+        return comment.userId.lowercased() == currentUserId.lowercased()
+    }
+
+    private func startEditing(_ comment: PortfolioComment) {
+        editingComment = comment
+        commentDraft = comment.text
+        commentError = nil
+        commentFieldFocused = true
+    }
+
+    private func deleteComment(_ comment: PortfolioComment) async {
+        commentError = nil
+        if await onDeleteComment(comment) {
+            comments.removeAll { $0.id == comment.id }
+            if editingComment?.id == comment.id {
+                editingComment = nil
+                commentDraft = ""
+            }
+            X5Feedback.success()
+        } else {
+            commentError = "Не удалось удалить комментарий. Проверьте интернет и попробуйте ещё раз."
+            X5Feedback.error()
+        }
     }
 
     private func commentAuthorName(_ comment: PortfolioComment) -> String {
@@ -875,6 +980,26 @@ private struct PortfolioInstagramPostPage: View {
     }
 
     private var commentInput: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if editingComment != nil {
+                HStack(spacing: 8) {
+                    Label("Изменение комментария", systemImage: "pencil")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.6))
+                    Spacer()
+                    Button("Отмена") {
+                        editingComment = nil
+                        commentDraft = ""
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 12, weight: .bold))
+                }
+            }
+            commentInputRow
+        }
+    }
+
+    private var commentInputRow: some View {
         HStack(spacing: 8) {
             TextField("Комментарий...", text: $commentDraft)
                 .focused($commentFieldFocused)
@@ -887,7 +1012,9 @@ private struct PortfolioInstagramPostPage: View {
             Button {
                 Task { await sendComment() }
             } label: {
-                Image(systemName: sendingComment ? "hourglass" : "arrow.up.circle.fill")
+                Image(systemName: sendingComment
+                      ? "hourglass"
+                      : (editingComment == nil ? "arrow.up.circle.fill" : "checkmark.circle.fill"))
                     .font(.system(size: 28))
             }
             .disabled(commentDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || sendingComment)
@@ -921,6 +1048,25 @@ private struct PortfolioInstagramPostPage: View {
         sendingComment = true
         defer { sendingComment = false }
         commentError = nil
+        if let editing = editingComment {
+            guard text != editing.text else {
+                editingComment = nil
+                commentDraft = ""
+                return
+            }
+            if let updated = await onEditComment(editing, text) {
+                // Сервер не умеет править на месте — новый комментарий встаёт в конец.
+                comments.removeAll { $0.id == editing.id }
+                comments.append(updated)
+                editingComment = nil
+                commentDraft = ""
+                X5Feedback.success()
+            } else {
+                commentError = "Не удалось изменить комментарий. Проверьте интернет и попробуйте ещё раз."
+                X5Feedback.error()
+            }
+            return
+        }
         if let comment = await onAddComment(text) {
             comments.append(comment)
             commentDraft = ""
@@ -1089,10 +1235,7 @@ private struct PortfolioCoverPickerRow: View {
                         Image(uiImage: cover).resizable().scaledToFill()
                     } else if let currentCoverURL {
                         CachedAsyncImage(url: currentCoverURL) { image in
-                            image
-                                .resizable()
-                                .scaledToFill()
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                            PortfolioCoverTopCrop(image: image)
                         } placeholder: {
                             ProgressView().tint(.white)
                         }

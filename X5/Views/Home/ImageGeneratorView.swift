@@ -20,14 +20,17 @@ struct ImageGeneratorView: View {
     @State private var selectedQuantity = 1
     @State private var selectedSize: ImageGenerationSize = .square
     @State private var showingGallery = false
-    // «Фото героя» / «Основная фотография» и логотип — через галерею UIKit
-    // (SystemPhotoPicker): SwiftUI-шная перезапускалась при перерисовке экрана (Адильхан 10.10).
+    // Все фото на этом экране — через галерею UIKit (X5PhotoPickerPresenter):
+    // SwiftUI-шная закрывалась и открывалась заново после Face ID (Адильхан 10.10;
+    // 18:05 — «Примеры обложек тоже тупняк»).
     @State private var showingMainPhotoPicker = false
     @State private var showingLogoPicker = false
+    @State private var showingReferencePicker = false
+    /// Сколько референсов можно в текущем разделе (4 или 6).
+    @State private var referenceMaxCount = 4
     /// Номер последнего выбора по слоту: результат старой загрузки не ставим.
     @State private var mainPhotoPickID = 0
     @State private var logoPickID = 0
-    @State private var referenceItems: [PhotosPickerItem] = []
     @State private var mainPhoto: ImageReferenceAsset?
     @State private var logoImage: ImageReferenceAsset?
     @State private var referenceImages: [ImageReferenceAsset] = []
@@ -131,8 +134,9 @@ struct ImageGeneratorView: View {
         .sheet(isPresented: $showingGallery) {
             GeneratedGalleryView()
         }
-        .onChange(of: referenceItems) { newItems in
-            Task { await loadReferenceImages(newItems) }
+        .x5PhotoPicker(isPresented: $showingReferencePicker, limit: referencePickLimit) { providers in
+            let maxCount = referenceMaxCount
+            Task { await loadReferenceProviders(providers, maxCount: maxCount) }
         }
         .x5SinglePhotoPicker(isPresented: $showingMainPhotoPicker) { provider in
             Task { await loadSinglePhoto(provider, slot: .main) }
@@ -639,7 +643,7 @@ struct ImageGeneratorView: View {
                 .buttonStyle(.plain)
                 .disabled(isGenerating || isLoadingReferences || isLoadingLogo)
 
-                PhotosPicker(selection: $referenceItems, maxSelectionCount: 4, matching: .images) {
+                Button { openReferencePicker(maxCount: 4) } label: {
                     uploadSlot(
                         title: "Референс",
                         subtitle: referenceImages.isEmpty ? "Пример желаемого оформления" : "Добавлено: \(referenceImages.count)",
@@ -666,7 +670,7 @@ struct ImageGeneratorView: View {
                 .buttonStyle(.plain)
                 .disabled(isGenerating || isLoadingReferences || isLoadingMainPhoto)
 
-                PhotosPicker(selection: $referenceItems, maxSelectionCount: 4, matching: .images) {
+                Button { openReferencePicker(maxCount: 4) } label: {
                     uploadSlot(
                         title: "Примеры обложек",
                         subtitle: referenceImages.isEmpty ? "До 4 референсов оформления" : "Добавлено: \(referenceImages.count)",
@@ -677,7 +681,7 @@ struct ImageGeneratorView: View {
                 .buttonStyle(.plain)
                 .disabled(isGenerating || isLoadingReferences)
             } else {
-                PhotosPicker(selection: $referenceItems, maxSelectionCount: 6, matching: .images) {
+                Button { openReferencePicker(maxCount: 6) } label: {
                     Label(referenceImages.isEmpty ? "Добавить фото" : "Изменить фото", systemImage: "photo.badge.plus")
                         .font(.system(size: 14, weight: .heavy))
                         .foregroundColor(.white)
@@ -706,13 +710,7 @@ struct ImageGeneratorView: View {
                                     )
 
                                 Button {
-                                    // Drop it from the picker selection too:
-                                    // otherwise the photo is still selected and
-                                    // comes back on the next pick.
                                     referenceImages.removeAll { $0.id == item.id }
-                                    referenceItems.removeAll {
-                                        Self.referenceIdentity($0) == item.id
-                                    }
                                 } label: {
                                     Image(systemName: "xmark.circle.fill")
                                         .font(.system(size: 20, weight: .bold))
@@ -1376,60 +1374,47 @@ struct ImageGeneratorView: View {
         .x5ClearGlass(cornerRadius: 18, highlight: 0.15)
     }
 
-    /// A picked photo keeps the same identity across reloads so the thumbnail
-    /// strip is never rebuilt from scratch.
-    private static func referenceIdentity(_ item: PhotosPickerItem) -> String {
-        item.itemIdentifier ?? String(describing: item)
+    /// Сколько фото дать выбрать в галерее: свободные места, а если всё занято —
+    /// полный набор (новый выбор тогда заменит старый).
+    private var referencePickLimit: Int {
+        let free = referenceMaxCount - referenceImages.count
+        return free > 0 ? free : referenceMaxCount
     }
 
-    private func loadReferenceImages(_ items: [PhotosPickerItem]) async {
-        let requested = Array(items.prefix(ImageReferenceSelection.maximumCount))
-        let requestedIDs = requested.map(Self.referenceIdentity)
-        let cached = Dictionary(
-            referenceImages.map { ($0.id, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
-        let plan = ImageReferenceSelection.plan(
-            requested: requestedIDs,
-            alreadyLoaded: referenceImages.map(\.id)
-        )
-        guard plan.needsWork else { return }
+    private func openReferencePicker(maxCount: Int) {
+        referenceMaxCount = maxCount
+        showingReferencePicker = true
+    }
 
-        if !plan.needsDecoding.isEmpty {
-            isLoadingReferences = true
-            photoLoadError = nil
-        }
+    /// Референсы из галереи UIKit. Галерея без доступа к медиатеке не помнит
+    /// прошлый выбор, поэтому новые фото добавляем к уже выбранным (убрать — крестиком).
+    private func loadReferenceProviders(_ providers: [NSItemProvider], maxCount: Int) async {
+        isLoadingReferences = true
+        photoLoadError = nil
         defer { isLoadingReferences = false }
 
-        var loaded: [ImageReferenceAsset] = []
-        for (item, id) in zip(requested, requestedIDs) {
-            if let existing = cached[id] {
-                loaded.append(existing)
-                continue
+        var added: [ImageReferenceAsset] = []
+        for provider in providers.prefix(maxCount) {
+            do {
+                // Общий загрузчик с CourseUP: файл → запасной путь через Data, ужатие
+                // до 1536 px вне главного потока, HEIC/PNG → JPEG. Ошибку не глотаем.
+                let prepared = try await PickedPhotoLoader.loadPrepared(from: provider, maxPixelSize: 1536)
+                added.append(ImageReferenceAsset(
+                    // Своя постоянная id: лента миниатюр не пересобирается с нуля.
+                    id: "ref-\(UUID().uuidString)",
+                    image: prepared.preview,
+                    reference: ImageGenerationReference(
+                        mimeType: "image/jpeg",
+                        base64: prepared.jpeg.base64EncodedString()
+                    )
+                ))
+            } catch {
+                photoLoadError = PickedPhotoLoader.errorText
             }
-            guard let asset = await loadReferenceImage(item) else { continue }
-            loaded.append(asset)
         }
-        referenceImages = loaded
-    }
-
-    private func loadReferenceImage(_ item: PhotosPickerItem) async -> ImageReferenceAsset? {
-        // Общий загрузчик с CourseUP: Data → запасной путь через файл, ужатие
-        // до 1536 px вне главного потока, HEIC/PNG → JPEG. Ошибку не глотаем.
-        do {
-            let prepared = try await PickedPhotoLoader.loadPrepared(from: item, maxPixelSize: 1536)
-            return ImageReferenceAsset(
-                id: Self.referenceIdentity(item),
-                image: prepared.preview,
-                reference: ImageGenerationReference(
-                    mimeType: "image/jpeg",
-                    base64: prepared.jpeg.base64EncodedString()
-                )
-            )
-        } catch {
-            photoLoadError = PickedPhotoLoader.errorText
-            return nil
-        }
+        guard !added.isEmpty else { return }
+        let kept = referenceImages.count >= maxCount ? [] : referenceImages
+        referenceImages = Array((kept + added).prefix(maxCount))
     }
 
     private enum SinglePhotoSlot {
