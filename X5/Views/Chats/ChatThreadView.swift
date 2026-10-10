@@ -19,7 +19,13 @@ struct ChatThreadView: View {
     @State private var showingProfile: Bool = false
     @State private var showingMenu: Bool = false
     @State private var confirmBlock: Bool = false
-    @State private var mediaItem: PhotosPickerItem?
+    /// Галерея UIKit (X5PhotoPickerPresenter): SwiftUI-шная после Face ID закрывалась
+    /// и открывалась по кругу (Адильхан 10.10). До 10 фото/видео за раз, как в WhatsApp.
+    @State private var showingMediaPicker: Bool = false
+    /// Пачка: какое сейчас по счёту («Отправка 3 из 10»). nil — пачки нет.
+    @State private var mediaBatchProgress: ChatMediaBatchProgress?
+    /// Фото на весь экран; у альбома листается.
+    @State private var photoViewer: ChatPhotoViewerState?
     @State private var attachmentError: String?
     @State private var attachmentUploadProgress: Double?
     @State private var roomUnread: [String: Int] = [:]
@@ -93,6 +99,8 @@ struct ChatThreadView: View {
             if let replyingTo {
                 replyBanner(for: replyingTo)
             }
+
+            mediaBatchBanner
 
             inputBar
         }
@@ -191,12 +199,17 @@ struct ChatThreadView: View {
         } message: {
             Text(loc.t("chat_block_message"))
         }
-        .onChange(of: mediaItem) { newValue in
-            guard let newValue else { return }
-            Task {
-                await sendSelectedMedia(newValue)
-                mediaItem = nil
-            }
+        .x5PhotoPicker(
+            isPresented: $showingMediaPicker,
+            limit: ChatAlbumGrouping.pickLimit,
+            filter: .any(of: [.images, .videos])
+        ) { providers in
+            Task { await sendPickedMedia(providers) }
+        }
+        .fullScreenCover(item: $photoViewer) { state in
+            ChatPhotoViewer(state: state, chatID: chat.id, service: service)
+                // Явно передаём: картинки берут токен из Auth для подписанной ссылки.
+                .environmentObject(auth)
         }
         .alert("Не отправилось", isPresented: Binding(
             get: { attachmentError != nil },
@@ -276,8 +289,9 @@ struct ChatThreadView: View {
                         .buttonStyle(.plain)
                         .disabled(loadingOlderMessages)
                     }
-                    ForEach(Array(visibleMessages.enumerated()), id: \.element.id) { pair in
-                        messageRow(message: pair.element, index: pair.offset)
+                    // Подряд идущие фото одного человека — один пузырь-альбом (ChatAlbumGrouping).
+                    ForEach(ChatAlbumGrouping.group(visibleMessages)) { item in
+                        messageRow(item: item)
                     }
                     // Якорь «низ ленты»: прокручиваем к нему, а не к id сообщения —
                     // так работает, даже если последнее сообщение скрыто («удалить у себя»).
@@ -340,28 +354,37 @@ struct ChatThreadView: View {
     }
 
     @ViewBuilder
-    private func messageRow(message: ChatMessageRow, index: Int) -> some View {
-        if shouldShowDateHeader(at: index) {
+    private func messageRow(item: ChatAlbumGrouping.Item) -> some View {
+        let message = item.first
+        if shouldShowDateHeader(at: item.startIndex) {
             DateDivider(text: dateHeaderText(for: message))
         }
+        // У альбома время и галочки — по последнему фото, ответ/закреп — по первому
+        // (или по тому, что уже закреплено). идея: меню на конкретном фото альбома.
         Bubble(
-            message: message,
+            message: item.last,
+            album: item.isAlbum ? item.messages : nil,
             chatID: chat.id,
             service: service,
             isMine: message.senderId == auth.userId,
-            isRead: isReadByPeer(message),
-            isPinned: message.id == pinnedMessageID,
-            isHighlighted: message.id == highlightedMessageID,
-            deliveryState: deliveryState(for: message),
+            isRead: isReadByPeer(item.last),
+            isPinned: item.contains(pinnedMessageID),
+            isHighlighted: item.contains(highlightedMessageID),
+            deliveryState: deliveryState(for: item.last),
             onReply: { replyingTo = message },
-            onTogglePin: { toggleMessagePin(message) },
-            onRetry: { retry(messageID: message.id) },
+            onTogglePin: {
+                toggleMessagePin(item.messages.first(where: { $0.id == pinnedMessageID }) ?? message)
+            },
+            onRetry: { retry(messageID: item.last.id) },
             onDeleteForMe: {
-                MessagesLocalState.hide(message.id)
+                item.messages.forEach { MessagesLocalState.hide($0.id) }
                 messageStateTick &+= 1
+            },
+            onOpenPhoto: { index in
+                photoViewer = ChatPhotoViewerState(messages: item.messages, startIndex: index)
             }
         )
-        .id(message.id)
+        .id(item.id)
         .simultaneousGesture(
             DragGesture(minimumDistance: 24, coordinateSpace: .local)
                 .onEnded { value in
@@ -462,10 +485,9 @@ struct ChatThreadView: View {
 
     private var inputBar: some View {
         HStack(spacing: 8) {
-            PhotosPicker(
-                selection: $mediaItem,
-                matching: .any(of: [.images, .videos])
-            ) {
+            Button {
+                showingMediaPicker = true
+            } label: {
                 ZStack {
                     if let attachmentUploadProgress {
                         ProgressView(value: attachmentUploadProgress)
@@ -479,7 +501,9 @@ struct ChatThreadView: View {
                 }
                 .frame(width: 36, height: 36)
             }
+            .buttonStyle(.plain)
             .disabled(sending)
+            .accessibilityLabel("Фото или видео, до \(ChatAlbumGrouping.pickLimit)")
 
             if recorder.isRecording {
                 recordingIndicator
@@ -491,6 +515,28 @@ struct ChatThreadView: View {
         }
         .padding(12)
         .background(Color.black.opacity(0.72).ignoresSafeArea(edges: .bottom))
+    }
+
+    /// «Отправка 3 из 10» над полем ввода, пока уходит пачка.
+    @ViewBuilder
+    private var mediaBatchBanner: some View {
+        if let mediaBatchProgress {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .tint(.accentColor)
+                Text(ChatAlbumGrouping.progressLabel(
+                    current: mediaBatchProgress.current,
+                    total: mediaBatchProgress.total
+                ))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.white.opacity(0.8))
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .fixedSize(horizontal: false, vertical: true)
+            .background(Color.white.opacity(0.05))
+        }
     }
 
     private var recordingIndicator: some View {
@@ -555,27 +601,74 @@ struct ChatThreadView: View {
         }
     }
 
-    private func sendSelectedMedia(_ item: PhotosPickerItem) async {
-        let isVideo = item.supportedContentTypes.contains { type in
-            type.conforms(to: .movie)
+    /// Пачка из галереи (до 10, как в WhatsApp — Адильхан 10.10).
+    /// Каждое фото/видео — отдельное сообщение: так пачку видят и старые версии
+    /// приложения, и сайт, без миграции базы. Альбомом их склеивает уже показ.
+    /// Строго по очереди, не параллельно: порядок в чате = порядок выбора.
+    private func sendPickedMedia(_ providers: [NSItemProvider]) async {
+        // Галерея больше 10 не даст, но лимит держим и тут.
+        let batch = Array(providers.prefix(ChatAlbumGrouping.pickLimit))
+        guard !batch.isEmpty, !sending else { return }
+        sending = true
+        defer {
+            sending = false
+            mediaBatchProgress = nil
         }
-        if isVideo {
-            await sendVideo(item)
-        } else {
-            await sendPhoto(item)
+
+        var failures: [String] = []
+        for (offset, provider) in batch.enumerated() {
+            if batch.count > 1 {
+                mediaBatchProgress = ChatMediaBatchProgress(current: offset + 1, total: batch.count)
+            }
+            let failure: String?
+            if Self.isVideo(provider) {
+                failure = await sendPickedVideo(provider)
+            } else {
+                failure = await sendPickedPhoto(provider)
+            }
+            // Одно не ушло — не молчим, но остальные всё равно отправляем.
+            if let failure { failures.append(failure) }
+        }
+
+        guard let firstFailure = failures.first else { return }
+        attachmentError = batch.count == 1
+            ? firstFailure
+            : "Не отправилось \(failures.count) из \(batch.count).\n\(firstFailure)"
+    }
+
+    private static func isVideo(_ provider: NSItemProvider) -> Bool {
+        provider.registeredTypeIdentifiers.contains { identifier in
+            guard let type = UTType(identifier) else { return false }
+            return type.conforms(to: .movie) || type.conforms(to: .video)
         }
     }
 
-    private func sendPhoto(_ item: PhotosPickerItem) async {
-        guard let token = await auth.freshAccessToken(), let uid = auth.userId else { return }
-        sending = true
-        defer { sending = false }
-        guard let raw = try? await item.loadTransferable(type: Data.self),
-              let img = UIImage(data: raw),
-              let jpeg = img.jpegData(compressionQuality: 0.82) else {
-            attachmentError = "Не удалось прочитать фото."
-            return
+    /// Новое сообщение — в ленту. merge, а не append: опрос сервера мог уже
+    /// принести это же сообщение, пока мы ждали ответ (иначе будет дубль).
+    private func appendSentMessage(_ inserted: ChatMessageRow) {
+        messages = ChatMessageTimeline.merge(messages, with: [inserted])
+        service.persistMessageCache(chatId: chat.id, rows: messages)
+        incrementPeerUnread()
+    }
+
+    /// nil — фото ушло; иначе текст, почему нет (покажем после всей пачки).
+    private func sendPickedPhoto(_ provider: NSItemProvider) async -> String? {
+        // Токен берём на каждое фото: пачка из 10 может идти дольше жизни токена.
+        guard let token = await auth.freshAccessToken(), let uid = auth.userId else {
+            return "Сессия истекла. Войдите снова и повторите отправку."
         }
+        let raw: Data
+        do {
+            raw = try await PickedPhotoLoader.loadMedia(from: provider).data
+        } catch {
+            return PickedPhotoLoader.errorText
+        }
+        // Ужатие как раньше (JPEG 0.82), но вне главного потока: 10 фото подряд не должны тормозить экран.
+        let jpeg = await Task.detached(priority: .userInitiated) {
+            UIImage(data: raw)?.jpegData(compressionQuality: 0.82)
+        }.value
+        guard let jpeg else { return "Не удалось прочитать фото." }
+
         guard let url = await service.uploadAttachment(
             chatId: chat.id,
             currentUserId: uid,
@@ -584,59 +677,46 @@ struct ChatThreadView: View {
             ext: "jpg",
             accessToken: token
         ) else {
-            attachmentError = service.error ?? "Не удалось загрузить фото."
-            return
+            return service.error ?? "Не удалось загрузить фото."
         }
         if let inserted = await service.sendMedia(chatId: chat.id, currentUserId: uid, type: "image", mediaUrl: url, mime: "image/jpeg", accessToken: token) {
-            messages.append(inserted)
-            service.persistMessageCache(chatId: chat.id, rows: messages)
-            incrementPeerUnread()
-        } else {
-            await service.deleteUploadedAttachment(
-                canonicalURL: url,
-                chatId: chat.id,
-                currentUserId: uid,
-                accessToken: token
-            )
-            attachmentError = service.error ?? "Не удалось отправить фото."
+            appendSentMessage(inserted)
+            return nil
         }
+        let failure = service.error ?? "Не удалось отправить фото."
+        await service.deleteUploadedAttachment(
+            canonicalURL: url,
+            chatId: chat.id,
+            currentUserId: uid,
+            accessToken: token
+        )
+        return failure
     }
 
-    private func sendVideo(_ item: PhotosPickerItem) async {
+    /// nil — видео ушло; иначе текст ошибки. Видео грузится файлом (TUS, с докачкой), не в память.
+    private func sendPickedVideo(_ provider: NSItemProvider) async -> String? {
         guard let initialToken = await auth.accessTokenForUpload(),
               let uid = auth.userId
         else {
-            attachmentError = "Сессия истекла. Войдите снова и повторите отправку."
-            return
+            return "Сессия истекла. Войдите снова и повторите отправку."
         }
 
-        sending = true
         attachmentUploadProgress = 0
-        defer {
-            sending = false
-            attachmentUploadProgress = nil
-        }
+        defer { attachmentUploadProgress = nil }
 
-        let picked: CourseGalleryVideo
+        let fileURL: URL
         do {
-            guard let loaded = try await item.loadTransferable(
-                type: CourseGalleryVideo.self
-            ) else {
-                attachmentError = "Не удалось прочитать видео."
-                return
-            }
-            picked = loaded
+            fileURL = try await ChatPickedVideo.stage(from: provider)
         } catch {
-            attachmentError = "Не удалось подготовить видео: \(error.localizedDescription)"
-            return
+            return "Не удалось подготовить видео: \(error.localizedDescription)"
         }
-        defer { CourseVideoStaging.removeIfManaged(picked.fileURL) }
+        defer { CourseVideoStaging.removeIfManaged(fileURL) }
 
-        let format = chatVideoFormat(for: picked.fileURL)
+        let format = chatVideoFormat(for: fileURL)
         guard let mediaURL = await service.uploadVideoAttachment(
             chatId: chat.id,
             currentUserId: uid,
-            fileURL: picked.fileURL,
+            fileURL: fileURL,
             mime: format.mime,
             ext: format.ext,
             accessToken: initialToken,
@@ -649,8 +729,7 @@ struct ChatThreadView: View {
                 }
             }
         ) else {
-            attachmentError = service.error ?? "Не удалось загрузить видео."
-            return
+            return service.error ?? "Не удалось загрузить видео."
         }
 
         guard let postUploadToken = await auth.freshAccessToken() else {
@@ -660,8 +739,7 @@ struct ChatThreadView: View {
                 currentUserId: uid,
                 accessToken: initialToken
             )
-            attachmentError = "Видео загружено, но сессия истекла до отправки сообщения. Повторите отправку."
-            return
+            return "Видео загружено, но сессия истекла до отправки сообщения. Повторите отправку."
         }
         if let inserted = await service.sendMedia(
             chatId: chat.id,
@@ -671,18 +749,17 @@ struct ChatThreadView: View {
             mime: format.mime,
             accessToken: postUploadToken
         ) {
-            messages.append(inserted)
-            service.persistMessageCache(chatId: chat.id, rows: messages)
-            incrementPeerUnread()
-        } else {
-            await service.deleteUploadedAttachment(
-                canonicalURL: mediaURL,
-                chatId: chat.id,
-                currentUserId: uid,
-                accessToken: postUploadToken
-            )
-            attachmentError = service.error ?? "Не удалось отправить видео."
+            appendSentMessage(inserted)
+            return nil
         }
+        let failure = service.error ?? "Не удалось отправить видео."
+        await service.deleteUploadedAttachment(
+            canonicalURL: mediaURL,
+            chatId: chat.id,
+            currentUserId: uid,
+            accessToken: postUploadToken
+        )
+        return failure
     }
 
     private func chatVideoFormat(for url: URL) -> (mime: String, ext: String) {
@@ -946,7 +1023,8 @@ struct ChatThreadView: View {
             pages += 1
         }
         guard visibleMessages.contains(where: { $0.id == id }) else { return }
-        scrollTargetID = id
+        // Закреплено фото из середины альбома — своей строки у него нет, крутим к альбому.
+        scrollTargetID = ChatAlbumGrouping.anchorID(for: id, in: ChatAlbumGrouping.group(visibleMessages))
         highlightedMessageID = id
         try? await Task.sleep(nanoseconds: 1_400_000_000)
         if highlightedMessageID == id {
@@ -1132,6 +1210,43 @@ private struct FailedTextMessage {
     let previewText: String
 }
 
+/// Прогресс пачки из галереи: «Отправка current из total».
+private struct ChatMediaBatchProgress: Equatable {
+    let current: Int
+    let total: Int
+}
+
+/// Что открыть на весь экран: все сообщения пузыря (альбом листается) и с какого начать.
+private struct ChatPhotoViewerState: Identifiable {
+    let id = UUID()
+    let messages: [ChatMessageRow]
+    let startIndex: Int
+}
+
+/// Видео из галереи UIKit → копия во временной папке (CourseVideoStaging).
+/// Не читаем в память целиком, как PickedPhotoLoader.loadMedia: видео до 47 МБ,
+/// а выбрать могут и больше — TUS-загрузке нужен файл, и он же даёт докачку.
+private enum ChatPickedVideo {
+    static func stage(from provider: NSItemProvider) async throws -> URL {
+        let registered = provider.registeredTypeIdentifiers.compactMap { UTType($0) }
+        let movieType = registered.first { $0.conforms(to: .movie) || $0.conforms(to: .video) } ?? .movie
+        return try await withCheckedThrowingContinuation { continuation in
+            provider.loadFileRepresentation(forTypeIdentifier: movieType.identifier) { url, error in
+                // Файл системы живёт только внутри замыкания — копируем сразу.
+                guard let url else {
+                    continuation.resume(throwing: error ?? PickedPhotoLoader.LoadError.unreadable)
+                    return
+                }
+                do {
+                    continuation.resume(returning: try CourseVideoStaging.stage(sourceURL: url, lessonID: "chat"))
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+}
+
 /// iOS 17+: лента сама стартует снизу (как в Telegram), без мигания сверху.
 /// На iOS 16 работает только scrollTo к якорю.
 private struct ChatBottomAnchorModifier: ViewModifier {
@@ -1283,6 +1398,8 @@ private struct DateDivider: View {
 
 private struct Bubble: View {
     let message: ChatMessageRow
+    /// 2+ фото пачкой — сетка в одном пузыре. message тогда — последнее фото (время, галочки).
+    var album: [ChatMessageRow]? = nil
     let chatID: String
     let service: ChatsService
     let isMine: Bool
@@ -1295,6 +1412,8 @@ private struct Bubble: View {
     var onTogglePin: (() -> Void)? = nil
     var onRetry: (() -> Void)? = nil
     var onDeleteForMe: (() -> Void)? = nil
+    /// Тап по фото → на весь экран; число — какое фото альбома открыть.
+    var onOpenPhoto: ((Int) -> Void)? = nil
     @EnvironmentObject private var loc: LocalizationService
 
     var body: some View {
@@ -1385,7 +1504,15 @@ private struct Bubble: View {
     private var payload: some View {
         switch message.type {
         case "image":
-            PrivateChatImageBubble(message: message, chatID: chatID, service: service)
+            if let album, album.count > 1 {
+                PrivateChatAlbumBubble(messages: album, chatID: chatID, service: service) { index in
+                    onOpenPhoto?(index)
+                }
+            } else {
+                PrivateChatImageBubble(message: message, chatID: chatID, service: service)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onOpenPhoto?(0) }
+            }
         case "audio":
             PrivateChatAudioBubble(message: message, chatID: chatID, service: service)
         case "video":
@@ -1589,10 +1716,151 @@ private struct ReadReceipt: View {
     }
 }
 
+/// Одиночное фото в ленте (как было до альбомов).
 private struct PrivateChatImageBubble: View {
     let message: ChatMessageRow
     let chatID: String
     let service: ChatsService
+
+    var body: some View {
+        ChatRemoteImage(message: message, chatID: chatID, service: service)
+            .frame(maxWidth: 360, maxHeight: 480)
+            .aspectRatio(3/4, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+/// Пузырь-альбом, как в WhatsApp: 2 — в ряд, 3 — большое + 2, 4+ — 2×2 и «+N» на 4-й плитке.
+private struct PrivateChatAlbumBubble: View {
+    let messages: [ChatMessageRow]
+    let chatID: String
+    let service: ChatsService
+    let onOpen: (Int) -> Void
+
+    // 260 — как ширина альбома на сайте; влезает в самый узкий iPhone с iOS 16 (375 pt).
+    private let width: CGFloat = 260
+    private let spacing: CGFloat = 2
+
+    var body: some View {
+        let layout = ChatAlbumGrouping.layout(count: messages.count)
+        let half = (width - spacing) / 2
+        VStack(spacing: spacing) {
+            switch layout.shape {
+            case .pair:
+                HStack(spacing: spacing) {
+                    tile(0, width: half, height: half, extra: 0)
+                    tile(1, width: half, height: half, extra: 0)
+                }
+            case .hero:
+                tile(0, width: width, height: width * 0.75, extra: 0)
+                HStack(spacing: spacing) {
+                    tile(1, width: half, height: half, extra: 0)
+                    tile(2, width: half, height: half, extra: 0)
+                }
+            case .grid:
+                HStack(spacing: spacing) {
+                    tile(0, width: half, height: half, extra: 0)
+                    tile(1, width: half, height: half, extra: 0)
+                }
+                HStack(spacing: spacing) {
+                    tile(2, width: half, height: half, extra: 0)
+                    tile(3, width: half, height: half, extra: layout.extra)
+                }
+            }
+        }
+        .frame(width: width)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Альбом, фото: \(messages.count)")
+    }
+
+    @ViewBuilder
+    private func tile(_ index: Int, width: CGFloat, height: CGFloat, extra: Int) -> some View {
+        if messages.indices.contains(index) {
+            ChatRemoteImage(message: messages[index], chatID: chatID, service: service)
+                .frame(width: width, height: height)
+                .clipped()
+                .overlay {
+                    if extra > 0 {
+                        ZStack {
+                            Color.black.opacity(0.55)
+                            Text("+\(extra)")
+                                .font(.system(size: 26, weight: .bold))
+                                .foregroundColor(.white)
+                        }
+                    }
+                }
+                .contentShape(Rectangle())
+                // onTapGesture, а не Button: внутри плитки своя кнопка «Повторить».
+                .onTapGesture { onOpen(index) }
+        }
+    }
+}
+
+/// Фото на весь экран. Альбом листается свайпом (TabView-страницы).
+private struct ChatPhotoViewer: View {
+    let state: ChatPhotoViewerState
+    let chatID: String
+    let service: ChatsService
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var selection: Int
+
+    init(state: ChatPhotoViewerState, chatID: String, service: ChatsService) {
+        self.state = state
+        self.chatID = chatID
+        self.service = service
+        _selection = State(initialValue: state.startIndex)
+    }
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            Color.black.ignoresSafeArea()
+            TabView(selection: $selection) {
+                ForEach(Array(state.messages.enumerated()), id: \.element.id) { pair in
+                    ChatRemoteImage(message: pair.element, chatID: chatID, service: service, contentMode: .fit)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .tag(pair.offset)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .ignoresSafeArea()
+
+            HStack {
+                if state.messages.count > 1 {
+                    Text("\(selection + 1) из \(state.messages.count)")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.85))
+                }
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 40, height: 40)
+                        .background(Color.white.opacity(0.15))
+                        .clipShape(Circle())
+                }
+                .accessibilityLabel("Закрыть")
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+        }
+        .preferredColorScheme(.dark)
+        // идея: щипок для зума и свайп вниз, чтобы закрыть, как в Telegram.
+    }
+}
+
+/// Фото из приватного бакета чата: подписанная ссылка → кэш → картинка; не вышло — «Повторить».
+/// Один загрузчик для пузыря, плиток альбома и полноэкранного просмотра.
+private struct ChatRemoteImage: View {
+    let message: ChatMessageRow
+    let chatID: String
+    let service: ChatsService
+    /// .fill — плитка/пузырь (края обрезаем), .fit — весь кадр на экране просмотра.
+    var contentMode: ContentMode = .fill
 
     @EnvironmentObject private var auth: Auth
     @State private var image: UIImage?
@@ -1605,9 +1873,9 @@ private struct PrivateChatImageBubble: View {
             if let image {
                 Image(uiImage: image)
                     .resizable()
-                    .scaledToFill()
+                    .aspectRatio(contentMode: contentMode)
             } else if isLoading {
-                Color.white.opacity(0.06)
+                (contentMode == .fit ? Color.clear : Color.white.opacity(0.06))
                     .overlay(ProgressView().tint(.white.opacity(0.5)))
             } else {
                 Button {
@@ -1625,9 +1893,6 @@ private struct PrivateChatImageBubble: View {
                 .buttonStyle(.plain)
             }
         }
-        .frame(maxWidth: 360, maxHeight: 480)
-        .aspectRatio(3/4, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .task(id: requestVersion) {
             await load(forceRefresh: requestVersion > 0)
         }
