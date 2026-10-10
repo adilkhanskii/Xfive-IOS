@@ -197,7 +197,8 @@ final class IAPCreditStoreTests: XCTestCase {
             "verified_cancel_note",
             "verified_restore",
             "verified_manage",
-            "verified_subscription_terms"
+            "verified_subscription_terms",
+            "verified_benefit_tasks"
         ]
 
         for language in AppLanguage.allCases {

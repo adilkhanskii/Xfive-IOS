@@ -203,8 +203,10 @@ private struct LessonVideoSurface: View {
             .padding(.bottom, SystemPlayerChrome.bottomClearance)
         }
         .background(Color.black)
+        // Запись экрана в курсах запрещена (Адильхан 10.10) — закрываем видео и паузим.
+        .courseScreenCaptureShield { playback.pause() }
         .onAppear {
-            playback.play()
+            if !ScreenCapture.isActive { playback.play() }
         }
         .onDisappear {
             if !isFullScreenPresented {
@@ -428,10 +430,12 @@ private struct FullScreenVideoPlayer: View {
         .ignoresSafeArea()
         .statusBarHidden(true)
         .background(Color.black.ignoresSafeArea())
+        // fullScreenCover — отдельный экран, шторку от записи ставим и здесь.
+        .courseScreenCaptureShield { playback.pause() }
         .onAppear {
             AppOrientationCoordinator.enterVideoFullscreen()
             timeline.attach(to: playback.player)
-            playback.play()
+            if !ScreenCapture.isActive { playback.play() }
             scheduleHide()
         }
         .onDisappear {

@@ -46,6 +46,9 @@ struct VerifiedBadgeView: View {
                         .multilineTextAlignment(.center)
 
                     VStack(alignment: .leading, spacing: 14) {
+                        // Адильхан 10.10: главное — задания первым. Сервер так и делает:
+                        // триггер tasks_priority_notify шлёт пуш с галочкой сразу, остальным через час.
+                        Benefit(icon: "bell.badge.fill", text: loc.t("verified_benefit_tasks"))
                         Benefit(icon: "arrow.up.circle.fill", text: loc.t("verified_benefit_1"))
                         Benefit(icon: "shield.checkered", text: loc.t("verified_benefit_2"))
                         Benefit(icon: "person.crop.circle.badge.checkmark", text: loc.t("verified_benefit_3"))

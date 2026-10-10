@@ -698,9 +698,14 @@ struct HubView: View {
     }
 
     private var visibleSpecialists: [HubSpecialist] {
-        service.specialists
+        let visible = service.specialists
             .filter { !BlockList.contains($0.id) }
             .filter { locationMatches(countryCode: $0.countryCode, city: $0.city) }
+        // Экран галочки обещает «твои карточки выше»: с активной галочкой — первыми,
+        // внутри групп порядок сервера (новые сверху) не меняется.
+        let now = Date()
+        return visible.filter { $0.hasActiveVerifiedBadge(at: now) }
+            + visible.filter { !$0.hasActiveVerifiedBadge(at: now) }
     }
 
     private func specialists(matching categoryId: String?) -> [HubSpecialist] {
