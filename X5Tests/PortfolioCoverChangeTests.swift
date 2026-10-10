@@ -77,8 +77,11 @@ final class PortfolioCoverChangeTests: XCTestCase {
         XCTAssertEqual(service.items.first?.thumbnailUrl, newCanonical, "Плитка в сетке берёт новый URL")
         XCTAssertNotEqual(service.items.first?.displayThumbnailUrl, before.displayThumbnailUrl)
         XCTAssertEqual(
-            recorder.requests.filter { $0.httpMethod == "POST" && $0.url?.path.contains("/thumbnails/") == true }.count,
-            1
+            recorder.requests.filter {
+                $0.httpMethod == "POST" && $0.url?.path.hasPrefix("/storage/v1/object/portfolio/") == true
+            }.count,
+            1,
+            "Ровно одна загрузка нового файла обложки"
         )
     }
 

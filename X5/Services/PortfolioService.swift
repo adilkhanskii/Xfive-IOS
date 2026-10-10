@@ -883,19 +883,14 @@ final class PortfolioService: ObservableObject {
               let updated = rows.first
         else { return nil }
 
+        // Сначала в список — новая строка из базы (с новой обложкой), потом автопроверка.
+        // Раньше автопроверка шла первой: если она падала (сеть, таймаут ИИ), moderate()
+        // возвращал СТАРУЮ строку из списка — в базе обложка новая, а в плитке старая
+        // («поменял обложку — не поменялось», Адильхан 10.10). Поймал XCTest
+        // PortfolioCoverChangeTests.
+        let resolved = await resolveMediaURLs(in: [updated], accessToken: accessToken).first ?? updated
         if let index = items.firstIndex(where: { $0.id == itemId }) {
-            let moderated: PortfolioItem
-            if let result = await moderate(
-                itemId: updated.id,
-                moderationRevision: updated.moderationRevision,
-                accessToken: accessToken
-            ) {
-                moderated = result
-            } else {
-                moderated = await resolveMediaURLs(in: [updated], accessToken: accessToken).first ?? updated
-            }
-            items[index] = moderated
-            return moderated
+            items[index] = resolved
         }
         if let moderated = await moderate(
             itemId: updated.id,
@@ -904,7 +899,7 @@ final class PortfolioService: ObservableObject {
         ) {
             return moderated
         }
-        return await resolveMediaURLs(in: [updated], accessToken: accessToken).first ?? updated
+        return items.first(where: { $0.id == itemId }) ?? resolved
     }
 
     // Лайки — `public.portfolio_likes` (portfolio_id text, user_id, UNIQUE пара),
