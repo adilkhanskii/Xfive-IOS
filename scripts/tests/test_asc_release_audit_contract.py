@@ -13,8 +13,8 @@ WORKFLOW = (
 
 class AppStoreReleaseAuditContractTests(unittest.TestCase):
     def test_internal_candidate_does_not_retarget_pending_review(self):
-        self.assertIn('EXPECTED_BUILD: "251"', WORKFLOW)
-        self.assertIn('EXPECTED_RUNTIME_BUILD: "251"', WORKFLOW)
+        self.assertIn('EXPECTED_BUILD: "257"', WORKFLOW)
+        self.assertIn('EXPECTED_RUNTIME_BUILD: "257"', WORKFLOW)
         self.assertIn('build.group(1) != os.environ["EXPECTED_RUNTIME_BUILD"]', WORKFLOW)
 
     def test_exact_app_name_is_a_live_audit_invariant(self):

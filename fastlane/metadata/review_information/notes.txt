@@ -1,4 +1,4 @@
-Xfive marketing. Version 1.1.12 build 251.
+Xfive marketing. Version 1.1.12 build 257.
 This update keeps the reviewed 1.1.10 payment safeguards: the selected StoreKit
 product is validated before any purchase success is reported and credit
 confirmation messages stay explicit. This build fixes the advertising creative

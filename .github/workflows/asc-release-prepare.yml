@@ -19,7 +19,7 @@ jobs:
       X5_APP_REVIEW_PASSWORD: ${{ secrets.X5_APP_REVIEW_PASSWORD }}
       BUNDLE_ID: com.x5studio.app
       VERSION: "1.1.12"
-      BUILD_NUMBER: "251"
+      BUILD_NUMBER: "257"
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:

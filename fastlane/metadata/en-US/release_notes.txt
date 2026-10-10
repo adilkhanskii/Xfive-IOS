@@ -1,1 +1,1 @@
-Pinned chat messages now show at the top for both people. Paid lessons and courses unlock for 30 days after purchase. Fixed overlapping video player buttons, voice message width and the reply banner.
+Send up to 10 photos at once in chats — they show up as an album. Edit or delete your own portfolio comments. Portfolio videos get their own cover. Picking photos no longer resets after Face ID. Hub icons and labels, pinned chat messages, paid lessons unlock for 30 days.
