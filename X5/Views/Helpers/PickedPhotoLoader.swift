@@ -97,13 +97,20 @@ enum X5PhotoPickerPresenter {
     /// Открытая галерея. Держим делегат, пока она не закроется (у picker он weak).
     private static var active: PickerDelegate?
 
-    /// limit — сколько фото можно выбрать. onPick получает [] при закрытии без выбора.
-    static func present(limit: Int, onPick: @escaping ([NSItemProvider]) -> Void) {
+    /// limit — сколько можно выбрать; filter — фото (.images) или фото и видео.
+    /// onPick получает [] при закрытии без выбора; порядок — как выбирал человек.
+    static func present(
+        limit: Int,
+        filter: PHPickerFilter = .images,
+        onPick: @escaping ([NSItemProvider]) -> Void
+    ) {
         // Второй тап, пока галерея открыта, игнорируем — иначе две галереи подряд.
         guard active == nil, let presenter = topViewController() else { return }
         var configuration = PHPickerConfiguration()
-        configuration.filter = .images
+        configuration.filter = filter
         configuration.selectionLimit = max(1, limit)
+        // Номера 1, 2, 3 на выбранных — как в WhatsApp, порядок сохраняется.
+        if limit > 1 { configuration.selection = .ordered }
         configuration.preferredAssetRepresentationMode = .current
         let picker = PHPickerViewController(configuration: configuration)
         let delegate = PickerDelegate { providers in
@@ -169,23 +176,53 @@ extension View {
         }
     }
 
-    /// Галерея на несколько фото (референсы). onPick не зовём, если ничего не выбрали.
+    /// Галерея на несколько фото/видео (референсы, чат). onPick не зовём, если ничего не выбрали.
     func x5PhotoPicker(
         isPresented: Binding<Bool>,
         limit: Int,
+        filter: PHPickerFilter = .images,
         onPick: @escaping ([NSItemProvider]) -> Void
     ) -> some View {
         onChange(of: isPresented.wrappedValue) { show in
             guard show else { return }
             isPresented.wrappedValue = false
-            X5PhotoPickerPresenter.present(limit: limit) { providers in
+            X5PhotoPickerPresenter.present(limit: limit, filter: filter) { providers in
                 if !providers.isEmpty { onPick(providers) }
             }
         }
     }
 }
 
+/// Фото или видео из галереи UIKit: байты + тип файла.
+struct PickedMedia {
+    let data: Data
+    let contentType: UTType
+
+    var isVideo: Bool { contentType.conforms(to: .movie) || contentType.conforms(to: .video) }
+    var mimeType: String { contentType.preferredMIMEType ?? (isVideo ? "video/quicktime" : "image/jpeg") }
+    var fileExtension: String { contentType.preferredFilenameExtension ?? (isVideo ? "mov" : "jpg") }
+}
+
 extension PickedPhotoLoader {
+    /// Видео или фото из галереи UIKit (портфолио «Добавить», чат).
+    /// Видео берём файлом: так iCloud-видео докачивается, а не падает.
+    static func loadMedia(from provider: NSItemProvider) async throws -> PickedMedia {
+        let registered = provider.registeredTypeIdentifiers.compactMap(UTType.init)
+        if let movieType = registered.first(where: { $0.conforms(to: .movie) || $0.conforms(to: .video) })
+            ?? (provider.hasItemConformingToTypeIdentifier(UTType.movie.identifier) ? UTType.movie : nil) {
+            let data: Data? = await withCheckedContinuation { continuation in
+                provider.loadFileRepresentation(forTypeIdentifier: movieType.identifier) { url, _ in
+                    // Файл системы живёт только внутри замыкания — читаем сразу.
+                    continuation.resume(returning: url.flatMap { try? Data(contentsOf: $0) })
+                }
+            }
+            guard let data, !data.isEmpty else { throw LoadError.unreadable }
+            return PickedMedia(data: data, contentType: movieType)
+        }
+        let imageType = registered.first(where: { $0.conforms(to: .image) }) ?? .jpeg
+        return PickedMedia(data: try await loadData(from: provider), contentType: imageType)
+    }
+
     /// Байты фото из галереи UIKit: сначала файлом (надёжнее для HEIC и iCloud),
     /// потом как Data. Файл системы живёт только внутри замыкания — читаем сразу там.
     static func loadData(from provider: NSItemProvider) async throws -> Data {
