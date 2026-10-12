@@ -50,8 +50,8 @@ class ReleaseVersionSourceTests(unittest.TestCase):
             r'APP_VERSION\s*=\s*"([^"]+)"', fastfile
         ).group(1)
 
-        self.assertEqual(marketing_version, "1.1.12")
-        # 09.10.2026: в App Store живая 1.1.10; ревью идёт как 1.1.12 сборка 251 из release/ios.
+        self.assertEqual(marketing_version, "1.1.13")
+        # 09.10.2026: в App Store живая 1.1.10; ревью идёт как 1.1.13 сборка 251 из release/ios.
         # Сборка в TestFlight и цель ревью снова один и тот же номер.
         # 07.10.2026: тестовые TestFlight-сборки ушли вперёд (245 — фикс модуля
         # курса + чат + город в профиле; 246 — то же + Bunny Stream для видео

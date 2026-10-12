@@ -1,4 +1,4 @@
-"""Set App Store version 1.1.12 to automatic release after Apple approval."""
+"""Set App Store version 1.1.13 to automatic release after Apple approval."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import time
 from typing import Protocol
 
 
-EXPECTED_VERSION = "1.1.12"
+EXPECTED_VERSION = "1.1.13"
 EXPECTED_BUILD = "257"
 TARGET_RELEASE_TYPE = "AFTER_APPROVAL"
 SAFE_APP_STORE_STATES = frozenset(

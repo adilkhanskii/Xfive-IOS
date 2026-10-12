@@ -620,7 +620,7 @@ begin
   insert into public.app_visit_events (user_id, session_id, platform, screen, app_version)
   values (v_buyer, gen_random_uuid(), 'web', 'home', null);
   insert into public.app_visit_events (user_id, session_id, platform, screen, app_version)
-  values (v_buyer, gen_random_uuid(), 'ios', 'photo', '1.1.12 (243)');
+  values (v_buyer, gen_random_uuid(), 'ios', 'photo', '1.1.13 (243)');
 
   -- Someone else's user_id: refused by the policy.
   begin
