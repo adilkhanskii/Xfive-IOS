@@ -33,6 +33,12 @@ struct ChatThreadView: View {
     @State private var replyingTo: ChatMessageRow?
     @State private var voicePressActive: Bool = false
     @State private var voiceStartInFlight: Bool = false
+    /// Свайп влево по микрофону отменил запись: до конца жеста новую запись не начинаем.
+    @State private var voiceCancelled: Bool = false
+    /// Насколько палец ушёл влево (≤ 0) — двигаем подсказку «‹ влево — отмена».
+    @State private var voiceDragX: CGFloat = 0
+    /// «Удалить у всех» ждёт подтверждения.
+    @State private var pendingDeleteForAll: [ChatMessageRow]?
     @State private var voiceSendInFlight: Bool = false
     @State private var lastVoiceSendFingerprint: String?
     @State private var lastVoiceSendAt: Date?
@@ -199,6 +205,20 @@ struct ChatThreadView: View {
         } message: {
             Text(loc.t("chat_block_message"))
         }
+        .confirmationDialog(
+            loc.t("chats_msg_delete_for_all_confirm"),
+            isPresented: Binding(
+                get: { pendingDeleteForAll != nil },
+                set: { if !$0 { pendingDeleteForAll = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(loc.t("chats_msg_delete_for_all"), role: .destructive) {
+                if let rows = pendingDeleteForAll { deleteForAll(rows) }
+                pendingDeleteForAll = nil
+            }
+            Button(loc.t("common_cancel"), role: .cancel) { pendingDeleteForAll = nil }
+        }
         .x5PhotoPicker(
             isPresented: $showingMediaPicker,
             limit: ChatAlbumGrouping.pickLimit,
@@ -254,7 +274,10 @@ struct ChatThreadView: View {
                 await pollNewMessages()
                 // Закреп собеседника подтягиваем раз в ~12 с — чаще не нужно, это лишний запрос.
                 pollTick &+= 1
-                if pollTick % 4 == 0 { await refreshPin() }
+                if pollTick % 4 == 0 {
+                    await refreshPin()
+                    await dropMessagesDeletedForAll()
+                }
             }
         }
     }
@@ -379,6 +402,9 @@ struct ChatThreadView: View {
             onDeleteForMe: {
                 item.messages.forEach { MessagesLocalState.hide($0.id) }
                 messageStateTick &+= 1
+            },
+            onDeleteForAll: {
+                pendingDeleteForAll = item.messages
             },
             onOpenPhoto: { index in
                 photoViewer = ChatPhotoViewerState(messages: item.messages, startIndex: index)
@@ -539,15 +565,23 @@ struct ChatThreadView: View {
         }
     }
 
+    /// Идёт запись: красная точка, таймер «0:07» и «‹ влево — отмена» (Адильхан 12.10: таймер и отмена записи).
+    /// Подсказка уезжает за пальцем и бледнеет — видно, что ещё чуть-чуть и запись отменится.
     private var recordingIndicator: some View {
         HStack(spacing: 8) {
             Circle()
                 .fill(.red)
                 .frame(width: 8, height: 8)
-            Text(loc.t("chat_recording_hint"))
-                .font(.system(size: 13))
+            Text(VoiceMessageTime.format(recorder.elapsed))
+                .font(.system(size: 15, weight: .semibold).monospacedDigit())
                 .foregroundColor(.white)
-            Spacer()
+            Spacer(minLength: 4)
+            Text(loc.t("chat_recording_cancel_hint"))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(.white.opacity(0.75))
+                .lineLimit(1)
+                .offset(x: max(voiceDragX, -Self.voiceCancelDistance))
+                .opacity(1 - Double(min(1, -voiceDragX / Self.voiceCancelDistance)) * 0.7)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -590,11 +624,15 @@ struct ChatThreadView: View {
                 .opacity((sending || voiceSendInFlight) ? 0.35 : 1)
                 .gesture(
                     DragGesture(minimumDistance: 0)
-                        .onChanged { _ in
+                        .onChanged { value in
                             beginVoicePress()
+                            voiceDragX = min(0, value.translation.width)
+                            if voiceDragX <= -Self.voiceCancelDistance { cancelVoicePress() }
                         }
                         .onEnded { _ in
                             endVoicePress()
+                            voiceCancelled = false
+                            withAnimation(.easeOut(duration: 0.2)) { voiceDragX = 0 }
                         }
                 )
                 .allowsHitTesting(!sending && !voiceSendInFlight)
@@ -770,7 +808,7 @@ struct ChatThreadView: View {
         }
     }
 
-    private func sendVoice(_ result: (data: Data, mime: String, ext: String)) async {
+    private func sendVoice(_ result: (data: Data, mime: String, ext: String, duration: TimeInterval)) async {
         guard let token = await auth.freshAccessToken(), let uid = auth.userId else { return }
         let fingerprint = voiceFingerprint(result.data)
         let now = Date()
@@ -796,7 +834,8 @@ struct ChatThreadView: View {
             attachmentError = service.error ?? "Не удалось загрузить голосовое."
             return
         }
-        if let inserted = await service.sendMedia(chatId: chat.id, currentUserId: uid, type: "audio", mediaUrl: url, mime: result.mime, accessToken: token) {
+        let lengthText = "\(max(1, Int(result.duration.rounded())))s"
+        if let inserted = await service.sendMedia(chatId: chat.id, currentUserId: uid, type: "audio", mediaUrl: url, mime: result.mime, content: lengthText, accessToken: token) {
             messages.append(inserted)
             service.persistMessageCache(chatId: chat.id, rows: messages)
             incrementPeerUnread()
@@ -913,8 +952,14 @@ struct ChatThreadView: View {
         }
     }
 
+    /// Сколько пальцем влево — и запись отменяется (как в WhatsApp/Telegram).
+    private static let voiceCancelDistance: CGFloat = 110
+    /// Короче — не отправляем: это случайный тап по микрофону (на видео Адильхана — голосовые 0:01).
+    private static let voiceMinDuration: TimeInterval = 0.8
+
     private func beginVoicePress() {
-        guard !sending,
+        guard !voiceCancelled,
+              !sending,
               !voiceSendInFlight,
               !voicePressActive,
               !voiceStartInFlight,
@@ -942,11 +987,64 @@ struct ChatThreadView: View {
             recorder.cancel()
             return
         }
+        guard result.duration >= Self.voiceMinDuration else { return }
         voiceSendInFlight = true
         Task {
             defer { voiceSendInFlight = false }
             await sendVoice(result)
         }
+    }
+
+    /// Свайп влево: запись в мусор, ничего не уходит.
+    private func cancelVoicePress() {
+        guard voicePressActive || recorder.isRecording else { return }
+        voicePressActive = false
+        voiceCancelled = true
+        recorder.cancel()
+        UINotificationFeedbackGenerator().notificationOccurred(.warning)
+    }
+
+    /// «Удалить у всех»: сразу убираем с экрана, потом сервер. Не вышло — возвращаем и показываем ошибку.
+    private func deleteForAll(_ rows: [ChatMessageRow]) {
+        let targets = rows.filter { $0.senderId == auth.userId && !$0.id.hasPrefix("local-") }
+        guard !targets.isEmpty else { return }
+        let ids = Set(targets.map(\.id))
+        let before = messages
+        messages.removeAll { ids.contains($0.id) }
+        if let pinned = pinnedMessageID, ids.contains(pinned) { pinnedMessageID = nil }
+        Task {
+            guard let token = await auth.freshAccessToken() else {
+                messages = before
+                return
+            }
+            var failed = false
+            for row in targets {
+                if !(await service.deleteMessageForAll(messageId: row.id, accessToken: token)) { failed = true }
+            }
+            if failed {
+                messages = before
+                pinError = service.error ?? "Не удалось удалить сообщение у всех."
+            } else {
+                service.persistMessageCache(chatId: chat.id, rows: messages)
+            }
+        }
+    }
+
+    /// Собеседник удалил сообщение у всех → убираем его и у нас. Сверяем последние сообщения с сервером
+    /// (опрос новых этого не видит). Неотправленные «local-…» не трогаем.
+    private func dropMessagesDeletedForAll() async {
+        guard let token = await auth.freshAccessToken(),
+              let recent = await service.loadRecentMessageIDs(chatId: chat.id, accessToken: token)
+        else { return }
+        let gone = messages.filter { row in
+            guard !row.id.hasPrefix("local-"), !recent.ids.contains(row.id) else { return false }
+            guard let oldest = recent.oldest else { return true }
+            return (row.createdAt ?? "") >= oldest
+        }
+        guard !gone.isEmpty else { return }
+        let goneIDs = Set(gone.map(\.id))
+        messages.removeAll { goneIDs.contains($0.id) }
+        service.persistMessageCache(chatId: chat.id, rows: messages)
     }
 
     private func markThreadRead() async {
@@ -1412,6 +1510,8 @@ private struct Bubble: View {
     var onTogglePin: (() -> Void)? = nil
     var onRetry: (() -> Void)? = nil
     var onDeleteForMe: (() -> Void)? = nil
+    /// «Удалить у всех» — только у своих отправленных сообщений.
+    var onDeleteForAll: (() -> Void)? = nil
     /// Тап по фото → на весь экран; число — какое фото альбома открыть.
     var onOpenPhoto: ((Int) -> Void)? = nil
     @EnvironmentObject private var loc: LocalizationService
@@ -1448,6 +1548,13 @@ private struct Bubble: View {
                             onCopy?()
                         } label: {
                             Label(loc.t("chats_msg_copy"), systemImage: "doc.on.doc")
+                        }
+                    }
+                    if isMine, deliveryState == .sent, !message.id.hasPrefix("local-") {
+                        Button(role: .destructive) {
+                            onDeleteForAll?()
+                        } label: {
+                            Label(loc.t("chats_msg_delete_for_all"), systemImage: "trash.fill")
                         }
                     }
                     Button(role: .destructive) {

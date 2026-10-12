@@ -717,6 +717,49 @@ final class ChatsService: ObservableObject {
         return (try? JSONDecoder().decode([ChatMessageRow].self, from: data)) ?? []
     }
 
+    /// id последних сообщений чата на сервере (новые сверху) и время самого старого из них.
+    /// Нужен, чтобы убрать с экрана то, что собеседник «удалил у всех»: новые сообщения мы дотягиваем
+    /// опросом, а исчезновение старых опрос не видит.
+    func loadRecentMessageIDs(chatId: String, limit: Int = 60, accessToken: String) async -> (ids: Set<String>, oldest: String?)? {
+        var components = URLComponents(url: baseURL.appendingPathComponent("rest/v1/messages"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "chat_id", value: "eq.\(chatId)"),
+            URLQueryItem(name: "select", value: "id,created_at"),
+            URLQueryItem(name: "order", value: "created_at.desc"),
+            URLQueryItem(name: "limit", value: String(limit))
+        ]
+        var request = URLRequest(url: components.url!)
+        request.setValue(anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        guard let (data, http) = await sendAuthed(request, accessToken: accessToken),
+              (200..<300).contains(http.statusCode),
+              let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else { return nil }
+        let ids = Set(rows.compactMap { $0["id"] as? String })
+        // Меньше limit — значит, это вся переписка: удалённым считается всё, чего нет в ответе.
+        let oldest = rows.count < limit ? nil : rows.last?["created_at"] as? String
+        return (ids, oldest)
+    }
+
+    /// «Удалить у всех»: удаляет сообщение на сервере (только своё — проверяет база, x5_delete_message_for_all).
+    func deleteMessageForAll(messageId: String, accessToken: String) async -> Bool {
+        error = nil
+        var rpc = URLRequest(url: baseURL.appendingPathComponent("rest/v1/rpc/x5_delete_message_for_all"))
+        rpc.httpMethod = "POST"
+        rpc.setValue(anonKey, forHTTPHeaderField: "apikey")
+        rpc.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        rpc.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        rpc.httpBody = try? JSONSerialization.data(withJSONObject: ["p_message_id": messageId])
+        // Ответ true — удалено, false — его уже нет на сервере: для экрана и то и другое успех.
+        guard let (_, http) = await sendAuthed(rpc, accessToken: accessToken),
+              (200..<300).contains(http.statusCode)
+        else {
+            error = "Не удалось удалить сообщение у всех."
+            return false
+        }
+        return true
+    }
+
     func loadChat(chatId: String, accessToken: String) async -> ChatRoom? {
         var components = URLComponents(url: baseURL.appendingPathComponent("rest/v1/chats"), resolvingAgainstBaseURL: false)!
         components.queryItems = [
@@ -1150,7 +1193,7 @@ final class ChatsService: ObservableObject {
 
     /// Inserts an image, audio or video message with a canonical media URL.
     @discardableResult
-    func sendMedia(chatId: String, currentUserId: String, type: String, mediaUrl: String, mime: String, accessToken: String) async -> ChatMessageRow? {
+    func sendMedia(chatId: String, currentUserId: String, type: String, mediaUrl: String, mime: String, content: String? = nil, accessToken: String) async -> ChatMessageRow? {
         error = nil
         guard ["image", "audio", "video"].contains(type),
               let host = baseURL.host,
@@ -1169,13 +1212,15 @@ final class ChatsService: ObservableObject {
         post.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         post.setValue("application/json", forHTTPHeaderField: "Content-Type")
         post.setValue("return=representation", forHTTPHeaderField: "Prefer")
-        let body: [String: AnyEncodable] = [
+        var body: [String: AnyEncodable] = [
             "chat_id": AnyEncodable(chatId),
             "sender_id": AnyEncodable(currentUserId),
             "type": AnyEncodable(type),
             "media_url": AnyEncodable(mediaUrl),
             "media_mime": AnyEncodable(mime)
         ]
+        // Голосовое: длина «4s», как пишет сайт, — плеер показывает её до загрузки файла.
+        if let content, !content.isEmpty { body["content"] = AnyEncodable(content) }
         post.httpBody = try? JSONEncoder().encode(body)
         guard let (data, http) = await sendAuthed(post, accessToken: accessToken),
               (200..<300).contains(http.statusCode),

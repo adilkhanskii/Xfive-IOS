@@ -61,10 +61,11 @@ class ReleaseVersionSourceTests(unittest.TestCase):
         # 09.10 вечер: TestFlight 252 (вторая пачка правок Адильхана); App Store-ревью пока остаётся на 251.
         # 10.10: TestFlight 253 (галочка: задания первым; запрет записи экрана в курсах).
         # 10.10 вечером: TestFlight 257 (обложка видео меняется, галерея на корне экрана, размеры Nano Banana, без поиска).
-        self.assertEqual(runtime_build_number, "257")
+        # 12.10: TestFlight 258 (голосовые: таймер, отмена свайпом, длина сразу; «Удалить у всех»).
+        self.assertEqual(runtime_build_number, "258")
         self.assertEqual(fastlane_version, marketing_version)
         self.assertIn(
-            f"Version {marketing_version} build 257",
+            f"Version {marketing_version} build 258",
             review_notes,
         )
         self.assertIn(
@@ -72,7 +73,7 @@ class ReleaseVersionSourceTests(unittest.TestCase):
             submit_workflow,
         )
         self.assertIn(
-            'EXPECTED_BUILD: "257"',
+            'EXPECTED_BUILD: "258"',
             submit_workflow,
         )
         self.assertIn(
@@ -80,7 +81,7 @@ class ReleaseVersionSourceTests(unittest.TestCase):
             prepare_workflow,
         )
         self.assertIn(
-            'BUILD_NUMBER: "257"',
+            'BUILD_NUMBER: "258"',
             prepare_workflow,
         )
 
