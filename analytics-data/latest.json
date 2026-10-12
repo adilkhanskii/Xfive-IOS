@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-10-12T13:02:13.546220Z",
+  "generatedAt": "2026-10-12T18:42:17.637991Z",
   "sync": {
     "status": "preparing",
     "message": "Apple готовит исторические отчёты",
@@ -52,9 +52,17 @@
   "builds": [
     {
       "platform": "iOS",
+      "version": "1.1.13",
+      "build": "258",
+      "status": "IN_BETA_TESTING",
+      "processingState": "VALID",
+      "uploadedDate": "2026-10-12T10:16:41-07:00"
+    },
+    {
+      "platform": "iOS",
       "version": "1.1.12",
       "build": "257",
-      "status": "IN_BETA_TESTING",
+      "status": "VALID",
       "processingState": "VALID",
       "uploadedDate": "2026-10-10T09:10:11-07:00"
     },
@@ -121,14 +129,6 @@
       "status": "VALID",
       "processingState": "VALID",
       "uploadedDate": "2026-10-09T04:10:16-07:00"
-    },
-    {
-      "platform": "iOS",
-      "version": "1.1.12",
-      "build": "247",
-      "status": "VALID",
-      "processingState": "VALID",
-      "uploadedDate": "2026-10-07T22:11:00-07:00"
     }
   ],
   "sources": {
