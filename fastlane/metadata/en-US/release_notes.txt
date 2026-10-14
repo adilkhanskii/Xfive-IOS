@@ -1,1 +1,1 @@
-Send up to 10 photos at once in chats — they show up as an album. Edit or delete your own portfolio comments. Portfolio videos get their own cover. Picking photos no longer resets after Face ID. Hub icons and labels, pinned chat messages, paid lessons unlock for 30 days.
+Voice messages in chats: a timer while you record, swipe left to cancel a recording, and the length of a voice message is shown right away. Delete your own message for everyone — it disappears for the other person too. Send up to 10 photos at once as an album, pinned chat messages and other fixes.

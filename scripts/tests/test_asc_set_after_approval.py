@@ -66,9 +66,9 @@ class SetAfterApprovalContractTests(unittest.TestCase):
             def get_attached_build(self, version_id):
                 self.version_id = version_id
                 return {
-                    "id": "build-257",
+                    "id": "build-258",
                     "attributes": {
-                        "version": "257",
+                        "version": "258",
                         "processingState": "VALID",
                         "expired": False,
                     },
@@ -86,7 +86,7 @@ class SetAfterApprovalContractTests(unittest.TestCase):
             client,
             bundle_id="com.x5studio.app",
             version_string="1.1.13",
-            build_number="257",
+            build_number="258",
         )
 
         self.assertEqual(client.updates, [("version-116", "AFTER_APPROVAL")])
@@ -97,7 +97,7 @@ class SetAfterApprovalContractTests(unittest.TestCase):
             client,
             bundle_id="com.x5studio.app",
             version_string="1.1.13",
-            build_number="257",
+            build_number="258",
         )
         self.assertEqual(len(client.updates), 1)
 
@@ -125,9 +125,9 @@ class SetAfterApprovalContractTests(unittest.TestCase):
 
             def get_attached_build(self, _version_id):
                 return {
-                    "id": "build-257",
+                    "id": "build-258",
                     "attributes": {
-                        "version": "257",
+                        "version": "258",
                         "processingState": "VALID",
                         "expired": False,
                     },
@@ -141,9 +141,9 @@ class SetAfterApprovalContractTests(unittest.TestCase):
 
         client = UnsafeClient()
         for version, build in (
-            ("1.1.5", "257"),
+            ("1.1.5", "258"),
             ("1.1.13", "226"),
-            ("1.1.13", "257"),
+            ("1.1.13", "258"),
         ):
             with self.subTest(version=version, build=build):
                 with self.assertRaises(ValueError):
@@ -186,9 +186,9 @@ class SetAfterApprovalContractTests(unittest.TestCase):
 
                     def get_attached_build(self, _version_id):
                         return {
-                            "id": "build-257",
+                            "id": "build-258",
                             "attributes": {
-                                "version": "257",
+                                "version": "258",
                                 "processingState": "VALID",
                                 "expired": False,
                             },
@@ -206,7 +206,7 @@ class SetAfterApprovalContractTests(unittest.TestCase):
                     client,
                     bundle_id="com.x5studio.app",
                     version_string="1.1.13",
-                    build_number="257",
+                    build_number="258",
                 )
                 self.assertEqual(result["appStoreState"], state)
                 self.assertEqual(result["releaseType"], "AFTER_APPROVAL")
@@ -255,12 +255,12 @@ class SetAfterApprovalContractTests(unittest.TestCase):
                         client,
                         bundle_id="com.x5studio.app",
                         version_string="1.1.13",
-                        build_number="257",
+                        build_number="258",
                     )
                 self.assertEqual(client.updates, [])
 
     def test_release_audit_workflow_exposes_explicit_guarded_action(self):
-        self.assertEqual(load_script().EXPECTED_BUILD, "257")
+        self.assertEqual(load_script().EXPECTED_BUILD, "258")
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
         self.assertIn('default: "audit"', workflow)
         self.assertIn("set_after_approval", workflow)

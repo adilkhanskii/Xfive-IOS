@@ -9,7 +9,7 @@ from typing import Protocol
 
 
 EXPECTED_VERSION = "1.1.13"
-EXPECTED_BUILD = "257"
+EXPECTED_BUILD = "258"  # 14.10: App Store 1.1.13 = TestFlight 258 (голосовые); с 257 отправка встала бы на этой проверке
 TARGET_RELEASE_TYPE = "AFTER_APPROVAL"
 SAFE_APP_STORE_STATES = frozenset(
     {
