@@ -1,4 +1,4 @@
-"""Set App Store version 1.1.13 to automatic release after Apple approval."""
+"""Set App Store version 1.1.14 to automatic release after Apple approval."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ import time
 from typing import Protocol
 
 
-EXPECTED_VERSION = "1.1.13"
-EXPECTED_BUILD = "258"  # 14.10: App Store 1.1.13 = TestFlight 258 (голосовые); с 257 отправка встала бы на этой проверке
+EXPECTED_VERSION = "1.1.14"
+EXPECTED_BUILD = "259"  # 19.10: 1.1.13 (258) уже в продаже; следующая App Store-версия 1.1.14 = TestFlight 259 (цена на кнопках генерации)
 TARGET_RELEASE_TYPE = "AFTER_APPROVAL"
 SAFE_APP_STORE_STATES = frozenset(
     {

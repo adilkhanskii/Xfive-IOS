@@ -175,7 +175,8 @@ struct LiveFruitsView: View {
                 actionLabel(
                     isBusy: isCreatingStory,
                     title: "Создать раскадровку",
-                    systemImage: "text.badge.star"
+                    systemImage: "text.badge.star",
+                    cost: "Бесплатно"
                 )
             }
             .buttonStyle(.plain)
@@ -279,6 +280,9 @@ struct LiveFruitsView: View {
                                 : "Пересоздать кадр"
                         )
                         Spacer()
+                        // Адильхан 18.10: цена у каждой кнопки, которая тратит кредиты
+                        Text(Self.creditsLabel(ImageGenerationCatalog.creditCost))
+                            .foregroundColor(X5Style.blue.opacity(0.8))
                     }
                     .font(.system(size: 13, weight: .bold))
                     .foregroundColor(X5Style.blue)
@@ -324,7 +328,8 @@ struct LiveFruitsView: View {
                 actionLabel(
                     isBusy: isCreatingFrames,
                     title: "Создать референс и 3 кадра",
-                    systemImage: "photo.stack"
+                    systemImage: "photo.stack",
+                    cost: Self.creditsLabel(framesCreditCost)
                 )
             }
             .buttonStyle(.plain)
@@ -354,7 +359,8 @@ struct LiveFruitsView: View {
                 actionLabel(
                     isBusy: isSubmittingVideo,
                     title: "Запустить видео",
-                    systemImage: "video.badge.waveform"
+                    systemImage: "video.badge.waveform",
+                    cost: Self.creditsLabel(Self.videoCreditCost)
                 )
             }
             .buttonStyle(.plain)
@@ -401,7 +407,8 @@ struct LiveFruitsView: View {
     private func actionLabel(
         isBusy: Bool,
         title: String,
-        systemImage: String
+        systemImage: String,
+        cost: String? = nil
     ) -> some View {
         HStack {
             if isBusy {
@@ -410,8 +417,18 @@ struct LiveFruitsView: View {
             } else {
                 Image(systemName: systemImage)
             }
-            Text(title)
-                .font(.system(size: 15, weight: .black))
+            // Адильхан 18.10: «везде информация нужна по стоимости» — цена второй строкой под названием
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 15, weight: .black))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                if let cost {
+                    Text(cost)
+                        .font(.system(size: 12, weight: .bold))
+                        .opacity(0.72)
+                }
+            }
             Spacer()
         }
         .foregroundColor(.black)
@@ -462,6 +479,32 @@ struct LiveFruitsView: View {
             && scenes.allSatisfy { frameBase64BySceneID[$0.id] != nil }
             && !isFrameGenerationBusy
             && !isSubmittingVideo
+    }
+
+    // Цена на «Создать референс и 3 кадра» = столько картинок, сколько реально уйдёт в генерацию
+    // (та же логика, что в createCharacterAndFrames): полный готовый набор пересоздаётся целиком,
+    // иначе — персонаж (если его ещё нет) и недостающие кадры.
+    private var framesCreditCost: Int {
+        let reconciled = LiveFruitsFrameLedger.reconciled(
+            scenes: scenes,
+            frames: frameBase64BySceneID,
+            fingerprints: frameFingerprintBySceneID
+        )
+        let missingFrames = scenes.filter { reconciled.frames[$0.id] == nil }.count
+        let images: Int
+        if characterReferenceBase64 != nil && missingFrames == 0 {
+            images = scenes.count + 1
+        } else {
+            images = missingFrames + (characterReferenceBase64 == nil ? 1 : 0)
+        }
+        return ImageGenerationCatalog.creditCost * max(1, images)
+    }
+
+    // 10 сек — как VIDEO_CREDIT_COSTS[10] в supabase/functions/generate-video/contract.mjs
+    private static let videoCreditCost = 1_200
+
+    private static func creditsLabel(_ credits: Int) -> String {
+        "\(credits) кредитов"
     }
 
     private var isFrameGenerationBusy: Bool {

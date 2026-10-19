@@ -1,1 +1,1 @@
-Voice messages in chats: a timer while you record, swipe left to cancel a recording, and the length of a voice message is shown right away. Delete your own message for everyone — it disappears for the other person too. Send up to 10 photos at once as an album, pinned chat messages and other fixes.
+The credit price is now shown right on the generate buttons: images, video, live products and regeneration. Minor fixes.

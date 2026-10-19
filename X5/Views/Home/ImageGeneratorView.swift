@@ -816,6 +816,8 @@ struct ImageGeneratorView: View {
                     Image(systemName: "wand.and.stars")
                 }
                 Text(generateButtonTitle)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             .font(.system(size: 16, weight: .heavy))
             .foregroundColor(.black)
@@ -914,7 +916,8 @@ struct ImageGeneratorView: View {
         if currentCredits == nil { return loc.t("gen_loading_balance") }
         if !hasEnoughCredits { return "\(loc.t("gen_need")) \(totalCreditCost) \(loc.t("gen_credits"))" }
         if !hasValidPromptOrReferences { return loc.t("gen_prompt_required") }
-        return loc.t("gen_generate")
+        // Адильхан 18.10: цена прямо на кнопке («Сгенерировать за 60 кредитов»), как было раньше
+        return String(format: loc.t("gen_generate_for"), totalCreditCost)
     }
 
     private var totalCreditCost: Int {
@@ -1928,6 +1931,12 @@ private struct GeneratedImageViewer: View {
                 .disabled(regeneratePrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .controlSize(.regular)
+
+            // Адильхан 18.10: цена видна у каждой генерации; перегенерация — одна картинка
+            Text("Перегенерация — \(ImageGenerationCatalog.creditCost) кредитов")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.white.opacity(0.55))
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(12)
         .background(Color.white.opacity(0.08))

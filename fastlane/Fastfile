@@ -16,7 +16,7 @@ platform :ios do
   # AppStoreVersion exists in ASC yet — otherwise it loops on
   # "Cannot find edit app store version" and times out (build 43 ASC
   # upload run hit this).
-  APP_VERSION = "1.1.13"
+  APP_VERSION = "1.1.14"
 
   desc "Push metadata + screenshots, do NOT submit"
   lane :upload do

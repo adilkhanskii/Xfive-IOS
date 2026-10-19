@@ -577,9 +577,11 @@ struct VideoGeneratorView: View {
                 Text(
                     isSubmitting
                         ? "Запускаем…"
-                        : "Создать за \(estimatedCreditCost)"
+                        : "Создать за \(estimatedCreditCost) кредитов"
                 )
                     .font(.system(size: 18, weight: .black))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             .foregroundColor(.black)
             .frame(maxWidth: .infinity)
