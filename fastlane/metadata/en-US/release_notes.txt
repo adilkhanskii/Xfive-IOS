@@ -1,1 +1,1 @@
-Large portfolio videos save again: the app now compresses the clip before upload. Minor fixes.
+Large portfolio videos save again: the app compresses the clip before upload. Settings → Support now has WhatsApp and a direct chat with X5 in the app.

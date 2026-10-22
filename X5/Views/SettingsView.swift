@@ -244,6 +244,25 @@ struct SettingsView: View {
                     }
                 }
 
+                // Поддержка (Адильхан 22.10): его WhatsApp и основной аккаунт X5 в приложении.
+                Section(loc.t("settings_support")) {
+                    if let whatsappURL = URL(string: X5SupportContacts.whatsappURL) {
+                        Link(destination: whatsappURL) {
+                            Label(loc.t("settings_support_whatsapp"), systemImage: "message.fill")
+                        }
+                    }
+                    NavigationLink {
+                        UserProfileView(userId: X5SupportContacts.officialAccountId, fallback: nil)
+                    } label: {
+                        Label(loc.t("settings_support_x5"), systemImage: "person.crop.circle.badge.checkmark")
+                    }
+                    if let supportURL = URL(string: "mailto:support@x5studio.app") {
+                        Link(destination: supportURL) {
+                            Label(loc.t("settings_support_email"), systemImage: "envelope.fill")
+                        }
+                    }
+                }
+
                 // Legal
                 Section(loc.t("settings_legal")) {
                     if let privacyURL = URL(string: "https://tooyakov-art.github.io/x5site/privacy.html") {
@@ -251,9 +270,6 @@ struct SettingsView: View {
                     }
                     if let termsURL = URL(string: "https://tooyakov-art.github.io/x5site/terms.html") {
                         Link(loc.t("settings_terms"), destination: termsURL)
-                    }
-                    if let supportURL = URL(string: "mailto:support@x5studio.app") {
-                        Link(loc.t("settings_support"), destination: supportURL)
                     }
                 }
 

@@ -9,7 +9,7 @@ from typing import Protocol
 
 
 EXPECTED_VERSION = "1.1.15"
-EXPECTED_BUILD = "260"  # 22.10: 1.1.14 (259) уже в продаже; следующая App Store-версия 1.1.15 = TestFlight 260 (видео портфолио > 50 МБ)
+EXPECTED_BUILD = "261"  # 22.10: 1.1.14 (259) в продаже; 1.1.15 = TestFlight 261 (видео портфолио > 50 МБ + поддержка WhatsApp/X5; 260 — только видео, не отправлялась)
 TARGET_RELEASE_TYPE = "AFTER_APPROVAL"
 # 22.10 Диас (tg 8553): 1.1.15 выпускаем вручную после одобрения → workflow ставит X5_RELEASE_TYPE=MANUAL.
 ALLOWED_RELEASE_TYPES = frozenset({"AFTER_APPROVAL", "MANUAL"})

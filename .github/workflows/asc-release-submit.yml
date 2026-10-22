@@ -17,7 +17,7 @@ jobs:
       ASC_API_KEY_BASE64: ${{ secrets.ASC_API_KEY_BASE64 }}
       BUNDLE_ID: com.x5studio.app
       EXPECTED_VERSION: "1.1.15"
-      EXPECTED_BUILD: "260"
+      EXPECTED_BUILD: "261"
       X5_RELEASE_TYPE: "MANUAL"  # 22.10 Диас: выпуск после одобрения — вручную
     steps:
       - name: Checkout
