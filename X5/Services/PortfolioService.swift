@@ -122,6 +122,37 @@ enum PortfolioMediaPolicy {
     }
 }
 
+/// Видео портфолио > 47 МБ не пролезет в Storage (Supabase Free: 50 МБ на файл,
+/// бакетом не поднять). Сжимаем в H.264 .mp4 ≤ 47 МБ готовым кодировщиком уроков
+/// (CourseVideoUploadPreparer), маленькие видео не трогаем.
+enum PortfolioVideoShrinker {
+    static func needsShrink(byteCount: Int) -> Bool {
+        Int64(byteCount) > CourseVideoUploadPolicy.directUploadLimitBytes
+    }
+
+    /// nonisolated async: запись 100+ МБ и перекодирование идут не на главном потоке.
+    static func shrink(_ data: Data, fileExtension: String) async throws -> Data {
+        let fileManager = FileManager.default
+        let directory = fileManager.temporaryDirectory
+            .appendingPathComponent("x5-portfolio-videos", isDirectory: true)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        let ext = ["mov", "mp4", "m4v"].contains(fileExtension.lowercased()) ? fileExtension.lowercased() : "mov"
+        let source = directory.appendingPathComponent("\(UUID().uuidString).\(ext)", isDirectory: false)
+        let prepared = CourseVideoStaging.preparedUploadURL(for: source)
+        defer {
+            try? fileManager.removeItem(at: source)
+            try? fileManager.removeItem(at: prepared)
+        }
+        try data.write(to: source, options: .atomic)
+        let output = try await CourseVideoUploadPreparer().prepare(fileURL: source)
+        let result = try Data(contentsOf: output)
+        if output.standardizedFileURL != prepared.standardizedFileURL {
+            try? fileManager.removeItem(at: output)
+        }
+        return result
+    }
+}
+
 struct PortfolioLikeState: Equatable {
     let isLiked: Bool
     let count: Int
@@ -385,13 +416,27 @@ final class PortfolioService: ObservableObject {
     /// Uploads image/video and stores stable object IDs, never expiring URLs.
     func addMedia(data: Data, type: String, mime: String, ext: String, thumbnailData: Data? = nil, thumbnailHasCover: Bool = false, userId: String, title: String?, description: String?, accessToken: String) async -> Bool {
         let cleanType = type == "video" ? "video" : "image"
-        let safeExt = ext.isEmpty ? (cleanType == "video" ? "mov" : "jpg") : ext
+        var safeExt = ext.isEmpty ? (cleanType == "video" ? "mov" : "jpg") : ext
+        var uploadData = data
+        var uploadMime = mime
+        // Supabase Free режет любой файл > 50 МБ (413), а видео с iPhone бывает 140+ МБ
+        // (Адильхан 22.10). Большое видео сжимаем тем же кодировщиком, что уроки курсов.
+        if cleanType == "video", PortfolioVideoShrinker.needsShrink(byteCount: data.count) {
+            do {
+                uploadData = try await PortfolioVideoShrinker.shrink(data, fileExtension: safeExt)
+                uploadMime = "video/mp4"
+                safeExt = "mp4"
+            } catch {
+                self.error = "Video prepare failed: \(error.localizedDescription)"
+                return false
+            }
+        }
         let identifier = "\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.lowercased())"
         let path = "\(userId)/\(identifier).\(safeExt)"
         guard let canonicalURL = await uploadPortfolioMedia(
-            data: data,
+            data: uploadData,
             path: path,
-            mime: mime,
+            mime: uploadMime,
             accessToken: accessToken
         ) else {
             self.error = "Upload failed"
