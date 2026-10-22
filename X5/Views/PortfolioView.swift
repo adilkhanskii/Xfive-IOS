@@ -1101,7 +1101,10 @@ private struct PortfolioInstagramPostPage: View {
             }
             // Расширение берём из пути хранилища, иначе «Поделиться» не поймёт тип файла.
             let ext = URL(string: item.mediaUrl ?? "")?.pathExtension ?? ""
-            let fallbackExt = item.type == "video" ? "mov" : "jpg"
+            // Видео из Bunny отдаётся как MP4.
+            let fallbackExt = item.type == "video"
+                ? (PortfolioMediaPolicy.bunnyVideoID(fromMediaURL: item.mediaUrl) != nil ? "mp4" : "mov")
+                : "jpg"
             let fileName = "Xfive-\(item.id.prefix(8)).\(ext.isEmpty ? fallbackExt : ext)"
             let target = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
             try? FileManager.default.removeItem(at: target)

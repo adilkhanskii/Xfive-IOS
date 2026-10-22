@@ -726,41 +726,6 @@ final class CourseVideoUploadPreparationTests: XCTestCase {
         )
     }
 
-    // Портфолио (Адильхан 22.10): видео 143 МБ получало 413 от Storage.
-    func testPortfolioShrinksOnlyVideosAboveTheStorageBudget() {
-        let limit = Int(CourseVideoUploadPolicy.directUploadLimitBytes)
-        XCTAssertFalse(PortfolioVideoShrinker.needsShrink(byteCount: limit))
-        XCTAssertTrue(PortfolioVideoShrinker.needsShrink(byteCount: limit + 1))
-        XCTAssertTrue(PortfolioVideoShrinker.needsShrink(byteCount: 143_173_434))
-    }
-
-    func testPortfolioShrinkReturnsPlayableMP4AndCleansTemporaryFiles() async throws {
-        let fixture = FileManager.default.temporaryDirectory
-            .appendingPathComponent("portfolio-shrink-\(UUID().uuidString).mp4")
-        defer { try? FileManager.default.removeItem(at: fixture) }
-        try await makeVideoFixture(at: fixture, transform: .identity, frameCount: 60)
-        let source = try Data(contentsOf: fixture)
-
-        let shrunk = try await PortfolioVideoShrinker.shrink(source, fileExtension: "MP4")
-
-        XCTAssertFalse(shrunk.isEmpty)
-        XCTAssertLessThanOrEqual(
-            Int64(shrunk.count),
-            CourseVideoUploadPolicy.directUploadLimitBytes
-        )
-        let check = FileManager.default.temporaryDirectory
-            .appendingPathComponent("portfolio-shrunk-\(UUID().uuidString).mp4")
-        defer { try? FileManager.default.removeItem(at: check) }
-        try shrunk.write(to: check)
-        let tracks = try await AVURLAsset(url: check).loadTracks(withMediaType: .video)
-        XCTAssertEqual(tracks.count, 1)
-
-        let workDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("x5-portfolio-videos", isDirectory: true)
-        let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: workDir.path)) ?? []
-        XCTAssertTrue(leftovers.isEmpty, "temporary files left: \(leftovers)")
-    }
-
     private func makeVideoFixture(
         at url: URL,
         transform: CGAffineTransform,

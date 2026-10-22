@@ -41,3 +41,8 @@ verify_jwt = false
 # X-X5-Reconcile-Secret; проверка в handler).
 [functions.course-video-legacy-import]
 verify_jwt = false
+
+# Видео портфолио из Bunny (22.10): гости смотрят одобренные кейсы с anon-ключом,
+# токен пользователя проверяется внутри (portfolio_video_playback_grant).
+[functions.portfolio-video-playback]
+verify_jwt = false

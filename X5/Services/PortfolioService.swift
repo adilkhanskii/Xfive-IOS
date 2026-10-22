@@ -57,7 +57,41 @@ struct PortfolioItem: Codable, Identifiable, Equatable {
     }
 }
 
+struct PortfolioBunnyPlayback: Decodable {
+    let hlsUrl: String?
+    let mp4Url: String?
+
+    enum CodingKeys: String, CodingKey {
+        case hlsUrl = "hls_url"
+        case mp4Url = "mp4_url"
+    }
+}
+
 enum PortfolioMediaPolicy {
+    static let bunnyMediaPrefix = "bunny-stream:"
+
+    static func bunnyMediaURL(videoID: String) -> String {
+        bunnyMediaPrefix + videoID.lowercased()
+    }
+
+    /// `bunny-stream:<uuid>` → id ролика; всё остальное — nil.
+    static func bunnyVideoID(fromMediaURL value: String?) -> String? {
+        guard let value, value.hasPrefix(bunnyMediaPrefix) else { return nil }
+        let id = String(value.dropFirst(bunnyMediaPrefix.count)).lowercased()
+        return UUID(uuidString: id) != nil ? id : nil
+    }
+
+    /// Только https-ссылки CDN Bunny (*.b-cdn.net); MP4 предпочтительнее HLS.
+    static func bunnyPlaybackURL(from payload: PortfolioBunnyPlayback) -> URL? {
+        for raw in [payload.mp4Url, payload.hlsUrl].compactMap({ $0 }) {
+            if let url = URL(string: raw), url.scheme == "https",
+               let host = url.host?.lowercased(), host.hasSuffix(".b-cdn.net") {
+                return url
+            }
+        }
+        return nil
+    }
+
     static let bucket = "portfolio"
     /// Превью видео с обложкой: «…-cover.jpg» = сверху обложка 3:4, снизу сетка
     /// кадров для автопроверки (одна картинка в существующей колонке thumbnail_url,
@@ -119,37 +153,6 @@ enum PortfolioMediaPolicy {
             && value != "."
             && value != ".."
             && value.unicodeScalars.allSatisfy(allowed.contains)
-    }
-}
-
-/// Видео портфолио > 47 МБ не пролезет в Storage (Supabase Free: 50 МБ на файл,
-/// бакетом не поднять). Сжимаем в H.264 .mp4 ≤ 47 МБ готовым кодировщиком уроков
-/// (CourseVideoUploadPreparer), маленькие видео не трогаем.
-enum PortfolioVideoShrinker {
-    static func needsShrink(byteCount: Int) -> Bool {
-        Int64(byteCount) > CourseVideoUploadPolicy.directUploadLimitBytes
-    }
-
-    /// nonisolated async: запись 100+ МБ и перекодирование идут не на главном потоке.
-    static func shrink(_ data: Data, fileExtension: String) async throws -> Data {
-        let fileManager = FileManager.default
-        let directory = fileManager.temporaryDirectory
-            .appendingPathComponent("x5-portfolio-videos", isDirectory: true)
-        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-        let ext = ["mov", "mp4", "m4v"].contains(fileExtension.lowercased()) ? fileExtension.lowercased() : "mov"
-        let source = directory.appendingPathComponent("\(UUID().uuidString).\(ext)", isDirectory: false)
-        let prepared = CourseVideoStaging.preparedUploadURL(for: source)
-        defer {
-            try? fileManager.removeItem(at: source)
-            try? fileManager.removeItem(at: prepared)
-        }
-        try data.write(to: source, options: .atomic)
-        let output = try await CourseVideoUploadPreparer().prepare(fileURL: source)
-        let result = try Data(contentsOf: output)
-        if output.standardizedFileURL != prepared.standardizedFileURL {
-            try? fileManager.removeItem(at: output)
-        }
-        return result
     }
 }
 
@@ -416,31 +419,36 @@ final class PortfolioService: ObservableObject {
     /// Uploads image/video and stores stable object IDs, never expiring URLs.
     func addMedia(data: Data, type: String, mime: String, ext: String, thumbnailData: Data? = nil, thumbnailHasCover: Bool = false, userId: String, title: String?, description: String?, accessToken: String) async -> Bool {
         let cleanType = type == "video" ? "video" : "image"
-        var safeExt = ext.isEmpty ? (cleanType == "video" ? "mov" : "jpg") : ext
-        var uploadData = data
-        var uploadMime = mime
-        // Supabase Free режет любой файл > 50 МБ (413), а видео с iPhone бывает 140+ МБ
-        // (Адильхан 22.10). Большое видео сжимаем тем же кодировщиком, что уроки курсов.
-        if cleanType == "video", PortfolioVideoShrinker.needsShrink(byteCount: data.count) {
+        let safeExt = ext.isEmpty ? (cleanType == "video" ? "mov" : "jpg") : ext
+        let identifier = "\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.lowercased())"
+        let canonicalURL: String
+        if cleanType == "video" {
+            // Видео — только в Bunny Stream (Диас 22.10: «любое видео — через Bunny»).
+            // Оригинал без сжатия, TUS докачивает при обрыве; в базе — bunny-stream:<id>.
             do {
-                uploadData = try await PortfolioVideoShrinker.shrink(data, fileExtension: safeExt)
-                uploadMime = "video/mp4"
-                safeExt = "mp4"
+                canonicalURL = try await uploadPortfolioVideoToBunny(
+                    data: data,
+                    fileExtension: safeExt,
+                    mime: mime,
+                    userId: userId,
+                    accessToken: accessToken
+                )
             } catch {
-                self.error = "Video prepare failed: \(error.localizedDescription)"
+                self.error = "Video upload failed: \(error.localizedDescription)"
                 return false
             }
-        }
-        let identifier = "\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.lowercased())"
-        let path = "\(userId)/\(identifier).\(safeExt)"
-        guard let canonicalURL = await uploadPortfolioMedia(
-            data: uploadData,
-            path: path,
-            mime: uploadMime,
-            accessToken: accessToken
-        ) else {
-            self.error = "Upload failed"
-            return false
+        } else {
+            let path = "\(userId)/\(identifier).\(safeExt)"
+            guard let uploaded = await uploadPortfolioMedia(
+                data: data,
+                path: path,
+                mime: mime,
+                accessToken: accessToken
+            ) else {
+                self.error = "Upload failed"
+                return false
+            }
+            canonicalURL = uploaded
         }
 
         var thumbnailURL: String?
@@ -491,6 +499,58 @@ final class PortfolioService: ObservableObject {
         items.removeAll { $0.id == resolved.id }
         items.insert(resolved, at: 0)
         return true
+    }
+
+    /// Видео портфолио → Bunny Stream: подпись TUS выдаёт create-portfolio-video-upload
+    /// (тот же загрузчик, что у уроков). Возвращает `bunny-stream:<video_id>`.
+    private func uploadPortfolioVideoToBunny(
+        data: Data,
+        fileExtension: String,
+        mime: String,
+        userId: String,
+        accessToken: String
+    ) async throws -> String {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("x5-portfolio-videos", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let identity = UUID().uuidString.lowercased()
+        let ext = fileExtension.isEmpty ? "mov" : fileExtension.lowercased()
+        let fileURL = directory.appendingPathComponent("\(identity).\(ext)", isDirectory: false)
+        try data.write(to: fileURL, options: .atomic)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+        let uploader = BunnyStreamResumableVideoUploader(
+            baseURL: baseURL,
+            anonKey: anonKey,
+            ticketFunctionName: "create-portfolio-video-upload"
+        )
+        let videoID = try await uploader.upload(
+            sourceFileURL: fileURL,
+            uploadIdentity: identity,
+            courseID: userId,
+            lessonID: "portfolio",
+            title: "Portfolio video",
+            contentType: mime.hasPrefix("video/") ? mime : "video/quicktime",
+            accessToken: accessToken,
+            progress: { _ in }
+        )
+        return PortfolioMediaPolicy.bunnyMediaURL(videoID: videoID)
+    }
+
+    /// Ссылка на просмотр видео из Bunny (MP4 — для плеера, превью кадра и «Поделиться»).
+    /// Пока Bunny кодирует — nil, в сетке видна обложка.
+    func bunnyPlaybackURL(itemId: String, accessToken: String) async -> URL? {
+        var request = URLRequest(url: functionsBaseURL.appendingPathComponent("portfolio-video-playback"))
+        request.httpMethod = "POST"
+        request.setValue(anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONEncoder().encode(["item_id": itemId])
+        guard let (data, response) = try? await session.data(for: request),
+              let http = response as? HTTPURLResponse,
+              http.statusCode == 200,
+              let payload = try? JSONDecoder().decode(PortfolioBunnyPlayback.self, from: data)
+        else { return nil }
+        return PortfolioMediaPolicy.bunnyPlaybackURL(from: payload)
     }
 
     private func uploadPortfolioMedia(
@@ -588,10 +648,17 @@ final class PortfolioService: ObservableObject {
         resolvedItems.reserveCapacity(sourceItems.count)
         for var item in sourceItems {
             if let canonical = item.mediaUrl, !canonical.isEmpty {
-                item.signedMediaUrl = await signedPortfolioMediaURL(
-                    canonicalURL: canonical,
-                    accessToken: accessToken
-                )?.absoluteString
+                if PortfolioMediaPolicy.bunnyVideoID(fromMediaURL: canonical) != nil {
+                    item.signedMediaUrl = await bunnyPlaybackURL(
+                        itemId: item.id,
+                        accessToken: accessToken
+                    )?.absoluteString
+                } else {
+                    item.signedMediaUrl = await signedPortfolioMediaURL(
+                        canonicalURL: canonical,
+                        accessToken: accessToken
+                    )?.absoluteString
+                }
             }
             if let canonical = item.thumbnailUrl, !canonical.isEmpty {
                 item.signedThumbnailUrl = await signedPortfolioMediaURL(

@@ -4,10 +4,28 @@ import {
   decisionFromModerationResult,
   MODERATION_MODEL,
 } from "./decision.mjs";
+import {
+  BUNNY_FAILED_STATUSES,
+  BUNNY_STATUS_FINISHED,
+  bunnyFrameCandidates,
+  bunnyVideoIdFromMediaUrl,
+  buildPolicyRequest,
+  parsePolicyResponse,
+  POLICY_MODEL_DEFAULT,
+  policyRejectReason,
+} from "./policy.mjs";
+import {
+  bunnyDeleteVideo,
+  bunnyEnvFromDeno,
+  bunnyGetVideo,
+  normalizeBunnyConfig,
+  playbackURL,
+} from "../_shared/bunny-stream.mjs";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ||
   "https://afwznqjpshybmqhlewmy.supabase.co";
 const OPENAI_MODERATION_URL = "https://api.openai.com/v1/moderations";
+const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
 const MAX_SWEEP_JOBS = 5;
 
 const corsHeaders = {
@@ -253,8 +271,20 @@ async function moderateItem(
     item.description ? `Описание: ${item.description}` : "",
   ].filter(Boolean).join("\n").trim();
 
-  const imageUrl = await signedImageURLFor(admin, item);
-  if (item.type === "video" && !imageUrl) {
+  // Картинки на проверку: фото кейса / обложка видео из Supabase Storage +
+  // для видео из Bunny — кадры самого ролика (не только обложка, Диас 22.10).
+  const imageUrls: string[] = [];
+  const storageImage = await signedImageURLFor(admin, item);
+  if (storageImage) imageUrls.push(storageImage);
+
+  const bunnyVideoId = bunnyVideoIdFromMediaUrl(item.media_url);
+  if (bunnyVideoId) {
+    const frames = await bunnyFramesFor(admin, item, bunnyVideoId);
+    if ("decision" in frames) return frames.decision;
+    imageUrls.push(...frames.urls);
+  }
+
+  if (item.type === "video" && imageUrls.length === 0) {
     return automaticPendingDecision({
       code: "video_preview_missing",
       result: { reason: "video_preview_missing" },
@@ -262,7 +292,7 @@ async function moderateItem(
       error: "video_preview_missing",
     });
   }
-  if (!text && !imageUrl) {
+  if (!text && imageUrls.length === 0) {
     return automaticPendingDecision({
       code: "empty_content",
       result: { reason: "empty_content" },
@@ -281,42 +311,202 @@ async function moderateItem(
     });
   }
 
-  const input: unknown[] = [];
-  if (text) input.push({ type: "text", text });
-  if (imageUrl) input.push({ type: "image_url", image_url: { url: imageUrl } });
+  // 1) omni-moderation: текст + каждая картинка/лист кадров отдельно
+  // (18+, насилие, самоповреждение на картинках; в тексте ещё ненависть, наркотики и др.).
+  const omniInputs: unknown[][] = [];
+  if (text) omniInputs.push([{ type: "text", text }]);
+  for (const url of imageUrls) {
+    omniInputs.push([{ type: "image_url", image_url: { url } }]);
+  }
+  const omniPayloads: Record<string, unknown>[] = [];
+  for (const input of omniInputs) {
+    const omni = await callOpenAI(OPENAI_MODERATION_URL, apiKey, {
+      model: MODERATION_MODEL,
+      input,
+    });
+    if (!omni.ok) {
+      return automaticPendingDecision({
+        code: "provider_unavailable",
+        result: { openai_status: omni.status, payload: omni.payload },
+        model: MODERATION_MODEL,
+        error: omni.error,
+      });
+    }
+    omniPayloads.push(omni.payload);
+    const decision = decisionFromModerationResult(
+      (omni.payload as { results?: unknown[] })?.results?.[0],
+      omni.payload,
+      MODERATION_MODEL,
+    );
+    if (decision.status !== "approved") {
+      return {
+        ...decision,
+        result: { omni: omniPayloads, checked_images: imageUrls.length },
+      };
+    }
+  }
 
+  // 2) правила X5: наркотики, оружие, экстремизм, мошенничество — и в тексте, и на картинках.
+  const policyModel = Deno.env.get("PORTFOLIO_POLICY_MODEL")?.trim() ||
+    POLICY_MODEL_DEFAULT;
+  const policy = await callOpenAI(
+    OPENAI_CHAT_URL,
+    apiKey,
+    buildPolicyRequest({ text, imageUrls, model: policyModel }),
+  );
+  const verdict = policy.ok ? parsePolicyResponse(policy.payload) : { ok: false };
+  if (!policy.ok || !verdict.ok) {
+    return automaticPendingDecision({
+      code: "policy_check_unavailable",
+      result: { openai_status: policy.status, omni: omniPayloads },
+      model: policyModel,
+      error: policy.error || "policy_response_invalid",
+    });
+  }
+  const result = {
+    omni: omniPayloads,
+    policy: verdict,
+    checked_images: imageUrls.length,
+  };
+  if (!verdict.allowed) {
+    return {
+      status: "rejected",
+      reason: policyRejectReason(verdict.violations),
+      result,
+      model: policyModel,
+      error: null,
+    };
+  }
+  return {
+    status: "approved",
+    reason: "Проверено автоматически",
+    result,
+    model: `${MODERATION_MODEL}+${policyModel}`,
+    error: null,
+  };
+}
+
+async function callOpenAI(
+  url: string,
+  apiKey: string,
+  body: unknown,
+): Promise<
+  { ok: boolean; status: number; payload: Record<string, unknown>; error: string | null }
+> {
   try {
-    const response = await fetch(OPENAI_MODERATION_URL, {
+    const response = await fetch(url, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ model: MODERATION_MODEL, input }),
-      signal: AbortSignal.timeout(20_000),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(40_000),
     });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      return automaticPendingDecision({
-        code: "provider_unavailable",
-        result: { openai_status: response.status, payload },
-        model: MODERATION_MODEL,
-        error: payload?.error?.message || `OpenAI ${response.status}`,
-      });
-    }
-    return decisionFromModerationResult(
-      payload?.results?.[0],
+    return {
+      ok: response.ok,
+      status: response.status,
       payload,
-      MODERATION_MODEL,
-    );
+      error: response.ok
+        ? null
+        : (payload?.error?.message || `OpenAI ${response.status}`),
+    };
   } catch (error) {
-    return automaticPendingDecision({
-      code: "provider_exception",
-      result: { exception: String(error) },
-      model: MODERATION_MODEL,
-      error: String(error),
-    });
+    return { ok: false, status: 0, payload: {}, error: String(error) };
   }
+}
+
+// Видео из Bunny: ролик должен принадлежать автору кейса и докодироваться;
+// тогда отдаём подписанные ссылки на реальные кадры (только те, что есть).
+async function bunnyFramesFor(
+  admin: AdminClient,
+  item: PortfolioItem,
+  videoId: string,
+): Promise<{ urls: string[] } | { decision: ModerationDecision }> {
+  const reject = (code: string, reason: string) => ({
+    decision: {
+      status: "rejected" as const,
+      reason,
+      result: { reason: code },
+      model: null,
+      error: null,
+    },
+  });
+  if (item.type !== "video") {
+    return reject("bunny_media_on_non_video", "Недопустимая ссылка на медиа портфолио");
+  }
+  const { data: owner } = await admin.rpc("portfolio_video_owner", {
+    p_video_id: videoId,
+  });
+  if (owner?.status !== "found" || owner?.user_id !== item.user_id) {
+    return reject("bunny_video_not_owned", "Недопустимая ссылка на медиа портфолио");
+  }
+  const config = normalizeBunnyConfig(bunnyEnvFromDeno((n: string) => Deno.env.get(n)), {
+    requireApiKey: true,
+    requireTokenKey: true,
+  });
+  if (!config) {
+    return {
+      decision: automaticPendingDecision({
+        code: "bunny_not_configured",
+        result: { reason: "bunny_not_configured" },
+        model: null,
+        error: "bunny_not_configured",
+      }),
+    };
+  }
+  const info = await bunnyGetVideo(fetch, config, videoId);
+  if (!info.ok) {
+    if (info.notFound) return reject("bunny_video_missing", "Видео не найдено");
+    return {
+      decision: automaticPendingDecision({
+        code: "bunny_unavailable",
+        result: { reason: "bunny_unavailable" },
+        model: null,
+        error: "bunny_unavailable",
+      }),
+    };
+  }
+  if ((BUNNY_FAILED_STATUSES as readonly number[]).includes(Number(info.video.providerStatus))) {
+    return reject("bunny_video_failed", "Видео не удалось обработать");
+  }
+  if (info.video.providerStatus !== BUNNY_STATUS_FINISHED) {
+    // Bunny ещё кодирует — кадров нет; очередь проверит снова (1, 5, 15 мин…).
+    return {
+      decision: automaticPendingDecision({
+        code: "video_processing",
+        result: { reason: "video_processing", encode_progress: info.video.encodeProgress },
+        model: null,
+        error: "video_processing",
+      }),
+    };
+  }
+  const expires = Math.floor(Date.now() / 1000) + 900;
+  const urls: string[] = [];
+  for (const file of bunnyFrameCandidates()) {
+    const url = await playbackURL(config, videoId, file, expires);
+    const probe = await fetch(url, {
+      headers: { Range: "bytes=0-0" },
+      signal: AbortSignal.timeout(8_000),
+    }).catch(() => null);
+    await probe?.body?.cancel().catch(() => {});
+    if (probe && (probe.status === 200 || probe.status === 206) &&
+      (probe.headers.get("content-type") || "").startsWith("image/")) {
+      urls.push(url);
+    }
+  }
+  if (urls.length === 0) {
+    return {
+      decision: automaticPendingDecision({
+        code: "video_frames_missing",
+        result: { reason: "video_frames_missing" },
+        model: null,
+        error: "video_frames_missing",
+      }),
+    };
+  }
+  return { urls };
 }
 
 async function signedImageURLFor(
@@ -339,7 +529,26 @@ async function removeRejectedPortfolioMedia(
   admin: AdminClient,
   item: PortfolioItem,
 ): Promise<string | null> {
-  const resolvedPaths = [item.media_url, item.thumbnail_url]
+  // Запрещённое видео не храним: удаляем ролик из Bunny и помечаем в учёте.
+  const bunnyVideoId = bunnyVideoIdFromMediaUrl(item.media_url);
+  let bunnyError: string | null = null;
+  if (bunnyVideoId) {
+    const { data: owner } = await admin.rpc("portfolio_video_owner", {
+      p_video_id: bunnyVideoId,
+    });
+    const config = normalizeBunnyConfig(
+      bunnyEnvFromDeno((n: string) => Deno.env.get(n)),
+    );
+    if (owner?.status === "found" && owner?.user_id === item.user_id && config) {
+      const deleted = await bunnyDeleteVideo(fetch, config, bunnyVideoId);
+      if (deleted) {
+        await admin.rpc("portfolio_video_mark_deleted", { p_video_id: bunnyVideoId });
+      } else {
+        bunnyError = "bunny_delete_failed";
+      }
+    }
+  }
+  const resolvedPaths = [bunnyVideoId ? null : item.media_url, item.thumbnail_url]
     .map((value) => value?.trim() || "")
     .filter(Boolean)
     .map((value) => portfolioObjectPath(value, item.user_id));
@@ -349,9 +558,9 @@ async function removeRejectedPortfolioMedia(
   const paths = Array.from(
     new Set(resolvedPaths.filter((value): value is string => value != null)),
   );
-  if (paths.length === 0) return null;
+  if (paths.length === 0) return bunnyError;
   const { error } = await admin.storage.from("portfolio").remove(paths);
-  return error?.message ?? null;
+  return error?.message ?? bunnyError;
 }
 
 async function cleanupPrivatePortfolioMedia(
@@ -416,7 +625,10 @@ function portfolioObjectPath(
 }
 
 function hasInvalidPortfolioMediaURL(item: PortfolioItem): boolean {
-  return [item.media_url, item.thumbnail_url]
+  // bunny-stream:<id> проверяется отдельно (владелец ролика — bunnyFramesFor).
+  const bunnyMedia = item.type === "video" &&
+    bunnyVideoIdFromMediaUrl(item.media_url) != null;
+  return [bunnyMedia ? "" : item.media_url, item.thumbnail_url]
     .map((value) => value?.trim() || "")
     .filter(Boolean)
     .some((value) => portfolioObjectPath(value, item.user_id) == null);

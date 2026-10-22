@@ -218,10 +218,13 @@ final class BunnyStreamUploadTicketClient {
     private let anonKey: String
     private let session: URLSession
     private let sleeper: Sleeper
+    /// Функция выдачи подписи TUS: уроки курсов или портфолио (тот же контракт).
+    private let functionName: String
 
     init(
         baseURL: URL,
         anonKey: String,
+        functionName: String = "create-course-video-upload",
         session: URLSession = .shared,
         sleeper: @escaping Sleeper = { seconds in
             try await Task.sleep(
@@ -231,6 +234,7 @@ final class BunnyStreamUploadTicketClient {
     ) {
         self.baseURL = baseURL
         self.anonKey = anonKey
+        self.functionName = functionName
         self.session = session
         self.sleeper = sleeper
     }
@@ -253,7 +257,7 @@ final class BunnyStreamUploadTicketClient {
         }
 
         let url = baseURL.appendingPathComponent(
-            "functions/v1/create-course-video-upload"
+            "functions/v1/\(functionName)"
         )
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -432,12 +436,14 @@ final class BunnyStreamResumableVideoUploader {
     init(
         baseURL: URL,
         anonKey: String,
+        ticketFunctionName: String = "create-course-video-upload",
         stateStore: BunnyStreamUploadStateStore =
             BunnyStreamUploadStateStore()
     ) {
         ticketClient = BunnyStreamUploadTicketClient(
             baseURL: baseURL,
-            anonKey: anonKey
+            anonKey: anonKey,
+            functionName: ticketFunctionName
         )
         self.stateStore = stateStore
     }
