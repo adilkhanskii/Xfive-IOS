@@ -38,6 +38,47 @@ class SetAfterApprovalContractTests(unittest.TestCase):
             "A guarded AFTER_APPROVAL patch script is required",
         )
 
+    def test_manual_release_type_keeps_manual_and_rejects_unknown(self):
+        # 22.10 Диас: 1.1.15 выпускаем вручную после одобрения Apple.
+        module = load_script()
+
+        class FakeClient:
+            def __init__(self, release_type):
+                self.updates = []
+                self.version = {"id": "version-117", "attributes": {"versionString": "1.1.15", "platform": "IOS", "appStoreState": "PREPARE_FOR_SUBMISSION", "releaseType": release_type}}
+
+            def find_app_id(self, bundle_id):
+                return "app-1"
+
+            def list_versions(self, app_id):
+                return [self.version]
+
+            def get_attached_build(self, version_id):
+                return {"id": "build-260", "attributes": {"version": "260", "processingState": "VALID", "expired": False}}
+
+            def update_release_type(self, version_id, release_type):
+                self.updates.append((version_id, release_type))
+                self.version["attributes"]["releaseType"] = release_type
+
+            def get_version(self, version_id):
+                return self.version
+
+        kept = FakeClient("MANUAL")
+        result = module.set_after_approval(kept, bundle_id="com.x5studio.app", version_string="1.1.15", build_number="260", target_release_type="MANUAL")
+        self.assertEqual(kept.updates, [])
+        self.assertEqual(result["releaseType"], "MANUAL")
+
+        switched = FakeClient("AFTER_APPROVAL")
+        module.set_after_approval(switched, bundle_id="com.x5studio.app", version_string="1.1.15", build_number="260", target_release_type="MANUAL")
+        self.assertEqual(switched.updates, [("version-117", "MANUAL")])
+
+        with self.assertRaises(ValueError):
+            module.set_after_approval(FakeClient("MANUAL"), bundle_id="com.x5studio.app", version_string="1.1.15", build_number="260", target_release_type="SCHEDULED")
+
+    def test_submit_workflow_requests_manual_release(self):
+        workflow = (pathlib.Path(__file__).resolve().parents[2] / ".github" / "workflows" / "asc-release-submit.yml").read_text(encoding="utf-8")
+        self.assertIn('X5_RELEASE_TYPE: "MANUAL"', workflow)
+
     def test_patches_only_release_type_and_confirms_unchanged_review_state(self):
         module = load_script()
         self.assertTrue(hasattr(module, "set_after_approval"))

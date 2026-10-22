@@ -1,4 +1,4 @@
-"""Set App Store version 1.1.15 to automatic release after Apple approval."""
+"""Lock App Store version 1.1.15 releaseType (AFTER_APPROVAL, or MANUAL via X5_RELEASE_TYPE)."""
 
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ from typing import Protocol
 EXPECTED_VERSION = "1.1.15"
 EXPECTED_BUILD = "260"  # 22.10: 1.1.14 (259) уже в продаже; следующая App Store-версия 1.1.15 = TestFlight 260 (видео портфолио > 50 МБ)
 TARGET_RELEASE_TYPE = "AFTER_APPROVAL"
+# 22.10 Диас (tg 8553): 1.1.15 выпускаем вручную после одобрения → workflow ставит X5_RELEASE_TYPE=MANUAL.
+ALLOWED_RELEASE_TYPES = frozenset({"AFTER_APPROVAL", "MANUAL"})
 SAFE_APP_STORE_STATES = frozenset(
     {
         "PREPARE_FOR_SUBMISSION",
@@ -47,8 +49,12 @@ def set_after_approval(
     bundle_id: str,
     version_string: str,
     build_number: str,
+    target_release_type: str = TARGET_RELEASE_TYPE,
 ) -> dict[str, str]:
     """PATCH only releaseType after strict version, build and state guards."""
+
+    if target_release_type not in ALLOWED_RELEASE_TYPES:
+        raise ValueError(f"Refusing target releaseType {target_release_type}")
 
     if version_string != EXPECTED_VERSION:
         raise ValueError(
@@ -80,7 +86,7 @@ def set_after_approval(
     before_state = before.get("appStoreState")
     if before_state not in SAFE_APP_STORE_STATES:
         raise ValueError(f"Refusing unsafe appStoreState {before_state}")
-    if before.get("releaseType") not in {"MANUAL", TARGET_RELEASE_TYPE}:
+    if before.get("releaseType") not in ALLOWED_RELEASE_TYPES:
         raise ValueError(f"Refusing releaseType {before.get('releaseType')}")
 
     build = client.get_attached_build(version_id)
@@ -94,8 +100,8 @@ def set_after_approval(
             f"Attached build is not the expected valid build {build_number}: {build_attrs}"
         )
 
-    if before.get("releaseType") != TARGET_RELEASE_TYPE:
-        client.update_release_type(version_id, TARGET_RELEASE_TYPE)
+    if before.get("releaseType") != target_release_type:
+        client.update_release_type(version_id, target_release_type)
 
     # Mandatory fresh GET: releaseType must be durable and the review state may
     # only advance through the explicitly safe pre-review/review states.
@@ -108,7 +114,7 @@ def set_after_approval(
         raise RuntimeError(
             f"Unsafe review state transition: {before_state} -> {confirmed_state}"
         )
-    if attrs.get("releaseType") != TARGET_RELEASE_TYPE:
+    if attrs.get("releaseType") != target_release_type:
         raise RuntimeError(
             f"releaseType was not confirmed: {attrs.get('releaseType')}"
         )
@@ -218,9 +224,10 @@ def main() -> int:
         bundle_id="com.x5studio.app",
         version_string=EXPECTED_VERSION,
         build_number=EXPECTED_BUILD,
+        target_release_type=os.environ.get("X5_RELEASE_TYPE", TARGET_RELEASE_TYPE),
     )
     print(
-        "AFTER_APPROVAL_CONFIRMED "
+        f"{result['releaseType']}_CONFIRMED "
         f"version={result['versionString']} build={result['build']} "
         f"state={result['appStoreState']} releaseType={result['releaseType']}"
     )
