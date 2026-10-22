@@ -1,9 +1,9 @@
-Xfive marketing. Version 1.1.14 build 259.
+Xfive marketing. Version 1.1.15 build 260.
 This update keeps the reviewed 1.1.10 payment safeguards: the selected StoreKit
 product is validated before any purchase success is reported and credit
-confirmation messages stay explicit. This build only changes labels: AI
-generate buttons now show their price in credits (for example "Generate for
-60 credits"); prices and charging are unchanged. No Kaspi or external checkout is added; all paid content is
+confirmation messages stay explicit. This build only changes portfolio video
+upload: videos larger than 47 MB are compressed on device (H.264) before
+upload; prices and charging are unchanged. No Kaspi or external checkout is added; all paid content is
 unlocked only with credits bought through In-App Purchase.
 
 Profile -> Store offers repeatable consumable packs of 1000, 2000 and 5000

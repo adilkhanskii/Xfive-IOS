@@ -50,8 +50,8 @@ class ReleaseVersionSourceTests(unittest.TestCase):
             r'APP_VERSION\s*=\s*"([^"]+)"', fastfile
         ).group(1)
 
-        self.assertEqual(marketing_version, "1.1.14")
-        # 09.10.2026: в App Store живая 1.1.10; ревью идёт как 1.1.14 сборка 251 из release/ios.
+        self.assertEqual(marketing_version, "1.1.15")
+        # 09.10.2026: в App Store живая 1.1.10; ревью идёт как 1.1.15 сборка 251 из release/ios.
         # Сборка в TestFlight и цель ревью снова один и тот же номер.
         # 07.10.2026: тестовые TestFlight-сборки ушли вперёд (245 — фикс модуля
         # курса + чат + город в профиле; 246 — то же + Bunny Stream для видео
@@ -62,11 +62,11 @@ class ReleaseVersionSourceTests(unittest.TestCase):
         # 10.10: TestFlight 253 (галочка: задания первым; запрет записи экрана в курсах).
         # 10.10 вечером: TestFlight 257 (обложка видео меняется, галерея на корне экрана, размеры Nano Banana, без поиска).
         # 12.10: TestFlight 258 (голосовые: таймер, отмена свайпом, длина сразу; «Удалить у всех»).
-        # 19.10: 1.1.13 (258) в продаже → 1.1.14 (259): цена в кредитах на кнопках генерации (Адильхан 18.10).
-        self.assertEqual(runtime_build_number, "259")
+        # 22.10: 1.1.14 (259) в продаже → 1.1.15 (260): большое видео портфолио сжимается до 47 МБ (Адильхан 22.10).
+        self.assertEqual(runtime_build_number, "260")
         self.assertEqual(fastlane_version, marketing_version)
         self.assertIn(
-            f"Version {marketing_version} build 259",
+            f"Version {marketing_version} build 260",
             review_notes,
         )
         self.assertIn(
@@ -74,7 +74,7 @@ class ReleaseVersionSourceTests(unittest.TestCase):
             submit_workflow,
         )
         self.assertIn(
-            'EXPECTED_BUILD: "259"',
+            'EXPECTED_BUILD: "260"',
             submit_workflow,
         )
         self.assertIn(
@@ -82,7 +82,7 @@ class ReleaseVersionSourceTests(unittest.TestCase):
             prepare_workflow,
         )
         self.assertIn(
-            'BUILD_NUMBER: "259"',
+            'BUILD_NUMBER: "260"',
             prepare_workflow,
         )
 

@@ -1,1 +1,1 @@
-The credit price is now shown right on the generate buttons: images, video, live products and regeneration. Minor fixes.
+Large portfolio videos save again: the app now compresses the clip before upload. Minor fixes.
