@@ -64,10 +64,12 @@ class PortfolioModerationSourceTests(unittest.TestCase):
     def test_video_uses_generated_thumbnail_and_text_in_existing_moderation(self):
         source = EDGE_FUNCTION.read_text(encoding="utf-8")
         image_lookup = source.index(
-            "const imageUrl = await signedImageURLFor(admin, item)"
+            "const storageImage = await signedImageURLFor(admin, item)"
         )
-        video_guard = source.index('if (item.type === "video" && !imageUrl)')
-        provider_call = source.index("fetch(OPENAI_MODERATION_URL")
+        video_guard = source.index(
+            'if (item.type === "video" && imageUrls.length === 0)'
+        )
+        provider_call = source.index("callOpenAI(OPENAI_MODERATION_URL")
 
         self.assertLess(image_lookup, video_guard)
         self.assertLess(video_guard, provider_call)
@@ -76,12 +78,25 @@ class PortfolioModerationSourceTests(unittest.TestCase):
         self.assertIn(
             'result: { reason: "video_preview_missing" }', source
         )
-        self.assertIn('if (text) input.push({ type: "text", text })', source)
+        self.assertIn('if (text) omniInputs.push([{ type: "text", text }])', source)
         self.assertIn(
-            'if (imageUrl) input.push({ type: "image_url", image_url: { url: imageUrl } })',
+            'omniInputs.push([{ type: "image_url", image_url: { url } }])',
             source,
         )
         self.assertIn("automaticPendingDecision", source)
+
+    def test_bunny_video_is_checked_by_real_frames_and_policy_before_publication(self):
+        # 22.10 Диас: видео — в Bunny, проверка по кадрам ролика, а не только обложке;
+        # наркотики/оружие/экстремизм/мошенничество — вторая проверка; запрещённое удаляется из Bunny.
+        source = EDGE_FUNCTION.read_text(encoding="utf-8")
+        frames = source.index("await bunnyFramesFor(admin, item, bunnyVideoId)")
+        omni = source.index("callOpenAI(OPENAI_MODERATION_URL")
+        policy = source.index("buildPolicyRequest({ text, imageUrls")
+        self.assertLess(frames, omni)
+        self.assertLess(omni, policy)
+        self.assertIn('code: "video_processing"', source)
+        self.assertIn("bunnyDeleteVideo(fetch, config, bunnyVideoId)", source)
+        self.assertIn('"portfolio_video_owner"', source)
 
     def test_edge_function_uses_revision_compare_and_swap(self):
         source = EDGE_FUNCTION.read_text(encoding="utf-8")
