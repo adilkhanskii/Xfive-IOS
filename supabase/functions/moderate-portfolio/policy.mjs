@@ -35,7 +35,9 @@ const POLICY_PROMPT = [
 ].join("\n");
 
 /** Тело запроса Chat Completions с картинками и строгим JSON-ответом. */
-export function buildPolicyRequest({ text, imageUrls, model = POLICY_MODEL_DEFAULT }) {
+export function buildPolicyRequest(
+  { text, imageUrls, model = POLICY_MODEL_DEFAULT },
+) {
   const content = [
     { type: "text", text: `Текст кейса:\n${text || "(нет текста)"}` },
     ...imageUrls.slice(0, POLICY_MAX_IMAGES).map((url) => ({
@@ -83,17 +85,25 @@ export function parsePolicyResponse(payload) {
   } catch {
     return { ok: false };
   }
-  if (typeof parsed?.allowed !== "boolean" || !Array.isArray(parsed?.violations)) {
+  if (
+    typeof parsed?.allowed !== "boolean" || !Array.isArray(parsed?.violations)
+  ) {
     return { ok: false };
   }
-  const violations = parsed.violations.filter((v) => POLICY_VIOLATIONS.includes(v));
+  const violations = parsed.violations.filter((v) =>
+    POLICY_VIOLATIONS.includes(v)
+  );
   // Модель сказала «разрешено», но назвала нарушение — считаем нарушением.
   const allowed = parsed.allowed && violations.length === 0;
   return {
     ok: true,
     allowed,
-    violations: allowed ? [] : (violations.length ? violations : ["other_illegal"]),
-    reason: typeof parsed.reason === "string" ? parsed.reason.slice(0, 300) : "",
+    violations: allowed
+      ? []
+      : (violations.length ? violations : ["other_illegal"]),
+    reason: typeof parsed.reason === "string"
+      ? parsed.reason.slice(0, 300)
+      : "",
   };
 }
 
@@ -135,7 +145,8 @@ export function bunnyFrameCandidates() {
 }
 
 export function bunnyVideoIdFromMediaUrl(value) {
-  const match = /^bunny-stream:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/
-    .exec(String(value || "").trim());
+  const match =
+    /^bunny-stream:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/
+      .exec(String(value || "").trim());
   return match ? match[1] : null;
 }

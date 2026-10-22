@@ -5,11 +5,11 @@ import {
   MODERATION_MODEL,
 } from "./decision.mjs";
 import {
+  buildPolicyRequest,
   BUNNY_FAILED_STATUSES,
   BUNNY_STATUS_FINISHED,
   bunnyFrameCandidates,
   bunnyVideoIdFromMediaUrl,
-  buildPolicyRequest,
   parsePolicyResponse,
   POLICY_MODEL_DEFAULT,
   policyRejectReason,
@@ -182,7 +182,14 @@ async function runSweep(admin: AdminClient): Promise<Response> {
   }
 
   const cleanup = await cleanupPrivatePortfolioMedia(admin);
-  return json({ ok: true, processed, outcomes, cleanup });
+  const bunnyOrphans = await cleanupBunnyOrphans(admin);
+  return json({
+    ok: true,
+    processed,
+    outcomes,
+    cleanup,
+    bunny_orphans: bunnyOrphans,
+  });
 }
 
 async function processClaim(
@@ -354,7 +361,9 @@ async function moderateItem(
     apiKey,
     buildPolicyRequest({ text, imageUrls, model: policyModel }),
   );
-  const verdict = policy.ok ? parsePolicyResponse(policy.payload) : { ok: false };
+  const verdict = policy.ok
+    ? parsePolicyResponse(policy.payload)
+    : { ok: false };
   if (!policy.ok || !verdict.ok) {
     return automaticPendingDecision({
       code: "policy_check_unavailable",
@@ -391,7 +400,12 @@ async function callOpenAI(
   apiKey: string,
   body: unknown,
 ): Promise<
-  { ok: boolean; status: number; payload: Record<string, unknown>; error: string | null }
+  {
+    ok: boolean;
+    status: number;
+    payload: Record<string, unknown>;
+    error: string | null;
+  }
 > {
   try {
     const response = await fetch(url, {
@@ -434,18 +448,27 @@ async function bunnyFramesFor(
     },
   });
   if (item.type !== "video") {
-    return reject("bunny_media_on_non_video", "Недопустимая ссылка на медиа портфолио");
+    return reject(
+      "bunny_media_on_non_video",
+      "Недопустимая ссылка на медиа портфолио",
+    );
   }
   const { data: owner } = await admin.rpc("portfolio_video_owner", {
     p_video_id: videoId,
   });
   if (owner?.status !== "found" || owner?.user_id !== item.user_id) {
-    return reject("bunny_video_not_owned", "Недопустимая ссылка на медиа портфолио");
+    return reject(
+      "bunny_video_not_owned",
+      "Недопустимая ссылка на медиа портфолио",
+    );
   }
-  const config = normalizeBunnyConfig(bunnyEnvFromDeno((n: string) => Deno.env.get(n)), {
-    requireApiKey: true,
-    requireTokenKey: true,
-  });
+  const config = normalizeBunnyConfig(
+    bunnyEnvFromDeno((n: string) => Deno.env.get(n)),
+    {
+      requireApiKey: true,
+      requireTokenKey: true,
+    },
+  );
   if (!config) {
     return {
       decision: automaticPendingDecision({
@@ -457,7 +480,8 @@ async function bunnyFramesFor(
     };
   }
   const info = await bunnyGetVideo(fetch, config, videoId);
-  if (!info.ok) {
+  const video = info.ok ? info.video : undefined;
+  if (!info.ok || !video) {
     if (info.notFound) return reject("bunny_video_missing", "Видео не найдено");
     return {
       decision: automaticPendingDecision({
@@ -468,15 +492,22 @@ async function bunnyFramesFor(
       }),
     };
   }
-  if ((BUNNY_FAILED_STATUSES as readonly number[]).includes(Number(info.video.providerStatus))) {
+  if (
+    (BUNNY_FAILED_STATUSES as readonly number[]).includes(
+      Number(video.providerStatus),
+    )
+  ) {
     return reject("bunny_video_failed", "Видео не удалось обработать");
   }
-  if (info.video.providerStatus !== BUNNY_STATUS_FINISHED) {
+  if (video.providerStatus !== BUNNY_STATUS_FINISHED) {
     // Bunny ещё кодирует — кадров нет; очередь проверит снова (1, 5, 15 мин…).
     return {
       decision: automaticPendingDecision({
         code: "video_processing",
-        result: { reason: "video_processing", encode_progress: info.video.encodeProgress },
+        result: {
+          reason: "video_processing",
+          encode_progress: video.encodeProgress,
+        },
         model: null,
         error: "video_processing",
       }),
@@ -491,8 +522,10 @@ async function bunnyFramesFor(
       signal: AbortSignal.timeout(8_000),
     }).catch(() => null);
     await probe?.body?.cancel().catch(() => {});
-    if (probe && (probe.status === 200 || probe.status === 206) &&
-      (probe.headers.get("content-type") || "").startsWith("image/")) {
+    if (
+      probe && (probe.status === 200 || probe.status === 206) &&
+      (probe.headers.get("content-type") || "").startsWith("image/")
+    ) {
       urls.push(url);
     }
   }
@@ -539,16 +572,23 @@ async function removeRejectedPortfolioMedia(
     const config = normalizeBunnyConfig(
       bunnyEnvFromDeno((n: string) => Deno.env.get(n)),
     );
-    if (owner?.status === "found" && owner?.user_id === item.user_id && config) {
+    if (
+      owner?.status === "found" && owner?.user_id === item.user_id && config
+    ) {
       const deleted = await bunnyDeleteVideo(fetch, config, bunnyVideoId);
       if (deleted) {
-        await admin.rpc("portfolio_video_mark_deleted", { p_video_id: bunnyVideoId });
+        await admin.rpc("portfolio_video_mark_deleted", {
+          p_video_id: bunnyVideoId,
+        });
       } else {
         bunnyError = "bunny_delete_failed";
       }
     }
   }
-  const resolvedPaths = [bunnyVideoId ? null : item.media_url, item.thumbnail_url]
+  const resolvedPaths = [
+    bunnyVideoId ? null : item.media_url,
+    item.thumbnail_url,
+  ]
     .map((value) => value?.trim() || "")
     .filter(Boolean)
     .map((value) => portfolioObjectPath(value, item.user_id));
@@ -561,6 +601,27 @@ async function removeRejectedPortfolioMedia(
   if (paths.length === 0) return bunnyError;
   const { error } = await admin.storage.from("portfolio").remove(paths);
   return error?.message ?? bunnyError;
+}
+
+// Видео, загруженное в Bunny, но не ставшее кейсом за сутки, — удаляем из Bunny.
+async function cleanupBunnyOrphans(admin: AdminClient): Promise<number> {
+  const { data, error } = await admin.rpc("portfolio_video_orphans", {
+    p_limit: 5,
+  });
+  if (error || !Array.isArray(data) || data.length === 0) return 0;
+  const config = normalizeBunnyConfig(
+    bunnyEnvFromDeno((n: string) => Deno.env.get(n)),
+  );
+  if (!config) return 0;
+  let removed = 0;
+  for (const videoId of data) {
+    if (typeof videoId !== "string") continue;
+    if (await bunnyDeleteVideo(fetch, config, videoId)) {
+      await admin.rpc("portfolio_video_mark_deleted", { p_video_id: videoId });
+      removed += 1;
+    }
+  }
+  return removed;
 }
 
 async function cleanupPrivatePortfolioMedia(
