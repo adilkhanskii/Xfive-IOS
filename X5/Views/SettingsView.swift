@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import MessageUI
 
 /// Settings sheet — split out of ProfileView. Contains account actions, language picker,
 /// Face ID toggle, public profile toggle, system links, version.
@@ -18,6 +19,11 @@ struct SettingsView: View {
     @State private var publicToggle: Bool = true
     @State private var showingStore = false
     @State private var isRestoringSubscriptions = false
+    @StateObject private var supportChats = ChatsService()
+    @State private var openingSupportChat = false
+    @State private var supportChat: ChatRoom?
+    @State private var showingEmailOptions = false
+    @State private var emailCopied = false
 
     private enum DeleteStage { case idle, firstConfirm, finalConfirm, deleting }
 
@@ -251,15 +257,56 @@ struct SettingsView: View {
                             Label(loc.t("settings_support_whatsapp"), systemImage: "message.fill")
                         }
                     }
-                    NavigationLink {
-                        UserProfileView(userId: X5SupportContacts.officialAccountId, fallback: nil)
-                    } label: {
-                        Label(loc.t("settings_support_x5"), systemImage: "person.crop.circle.badge.checkmark")
-                    }
-                    if let supportURL = URL(string: "mailto:support@x5studio.app") {
-                        Link(destination: supportURL) {
-                            Label(loc.t("settings_support_email"), systemImage: "envelope.fill")
+                    // 23.10 Адильхан: «Связаться с разработчиком» — сразу чат с его аккаунтом,
+                    // без промежуточного профиля (профиль у владельца мигал и закрывался).
+                    Button(action: openSupportChat) {
+                        HStack {
+                            Label(loc.t("settings_support_x5"), systemImage: "bubble.left.and.bubble.right.fill")
+                            Spacer()
+                            if openingSupportChat {
+                                ProgressView()
+                            }
                         }
+                    }
+                    .disabled(openingSupportChat)
+                    // 23.10: mailto без настроенной почты открывал «Новая учётная запись» в Почте —
+                    // теперь шторка с адресом: «Открыть почту» (если настроена) и «Скопировать адрес».
+                    Button {
+                        showingEmailOptions = true
+                    } label: {
+                        HStack {
+                            Label(loc.t("settings_support_email"), systemImage: "envelope.fill")
+                            Spacer()
+                            Text(X5SupportContacts.email)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
+                    }
+                    .confirmationDialog(
+                        X5SupportContacts.email,
+                        isPresented: $showingEmailOptions,
+                        titleVisibility: .visible
+                    ) {
+                        if MFMailComposeViewController.canSendMail(),
+                           let mailURL = X5SupportContacts.mailtoURL {
+                            Button(loc.t("settings_support_email_open")) {
+                                UIApplication.shared.open(mailURL)
+                            }
+                        }
+                        Button(loc.t("settings_support_email_copy")) {
+                            UIPasteboard.general.string = X5SupportContacts.email
+                            emailCopied = true
+                        }
+                        Button(loc.t("btn_cancel"), role: .cancel) {}
+                    } message: {
+                        Text(loc.t("settings_support_email_hint"))
+                    }
+                    .alert(loc.t("settings_support_email_copied"), isPresented: $emailCopied) {
+                        Button("OK", role: .cancel) {}
+                    } message: {
+                        Text(X5SupportContacts.email)
                     }
                 }
 
@@ -284,6 +331,11 @@ struct SettingsView: View {
             }
             .scrollContentBackground(.hidden)
             .background(Color(red: 0.04, green: 0.05, blue: 0.10))
+            // Чат с разработчиком — шторкой поверх Настроек, как «Написать» в профиле.
+            .sheet(item: $supportChat) { chat in
+                NavigationStack { ChatThreadView(chat: chat) }
+                    .preferredColorScheme(.dark)
+            }
             .navigationTitle(loc.t("settings_title"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbarColorScheme(.dark, for: .navigationBar)
@@ -350,6 +402,43 @@ struct SettingsView: View {
             }
             subscription.sync(from: currentUser.profile)
             errorMessage = iap.lastError
+        }
+    }
+
+    private func openSupportChat() {
+        // Владелец (сам Адильхан) себе написать не может — открываем его «Чаты»,
+        // туда приходят сообщения пользователей.
+        if X5SupportContacts.isOfficialAccount(auth.userId) {
+            NotificationCenter.default.post(
+                name: .x5SwitchTab,
+                object: nil,
+                userInfo: ["tab": X5AppTab.chats.notificationKey]
+            )
+            dismiss()
+            return
+        }
+        guard let me = auth.userId else { return }
+        errorMessage = nil
+        openingSupportChat = true
+        Task {
+            defer { openingSupportChat = false }
+            supportChats.configureAccessTokenProvider(auth: auth)
+            guard let token = await auth.freshAccessToken() else {
+                errorMessage = loc.t("settings_support_chat_failed")
+                return
+            }
+            let chat = await supportChats.ensureChat(
+                otherUserId: X5SupportContacts.officialAccountId,
+                currentUserId: me,
+                taskId: nil,
+                taskTitle: nil,
+                accessToken: token
+            )
+            if let chat {
+                supportChat = chat
+            } else {
+                errorMessage = loc.t("settings_support_chat_failed")
+            }
         }
     }
 

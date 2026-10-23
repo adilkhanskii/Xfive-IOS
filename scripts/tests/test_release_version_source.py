@@ -63,7 +63,9 @@ class ReleaseVersionSourceTests(unittest.TestCase):
         # 10.10 вечером: TestFlight 257 (обложка видео меняется, галерея на корне экрана, размеры Nano Banana, без поиска).
         # 12.10: TestFlight 258 (голосовые: таймер, отмена свайпом, длина сразу; «Удалить у всех»).
         # 22.10: 1.1.14 (259) в продаже → 1.1.15 (261): видео портфолио сжимается до 47 МБ + поддержка WhatsApp/X5 (Адильхан 22.10).
-        self.assertEqual(runtime_build_number, "261")
+        # 23.10: TestFlight 262 («Связаться с разработчиком» — сразу чат, понятная почта);
+        # на проверке Apple остаётся 261 (очередь не теряем), поэтому ниже цель ревью — 261.
+        self.assertEqual(runtime_build_number, "262")
         self.assertEqual(fastlane_version, marketing_version)
         self.assertIn(
             f"Version {marketing_version} build 261",
