@@ -1,4 +1,4 @@
-"""Lock App Store version 1.1.15 releaseType (AFTER_APPROVAL, or MANUAL via X5_RELEASE_TYPE)."""
+"""Lock App Store version 1.1.16 releaseType (AFTER_APPROVAL, or MANUAL via X5_RELEASE_TYPE)."""
 
 from __future__ import annotations
 
@@ -8,10 +8,10 @@ import time
 from typing import Protocol
 
 
-EXPECTED_VERSION = "1.1.15"
-EXPECTED_BUILD = "261"  # 22.10: 1.1.14 (259) в продаже; 1.1.15 = TestFlight 261 (видео портфолио > 50 МБ + поддержка WhatsApp/X5; 260 — только видео, не отправлялась)
+EXPECTED_VERSION = "1.1.16"
+EXPECTED_BUILD = "263"  # 24.10: 1.1.15 (261) выпущена; 1.1.16 = код TestFlight 262 (Bunny для видео портфолио, «Связаться с разработчиком» — сразу чат), пересобран как 263
 TARGET_RELEASE_TYPE = "AFTER_APPROVAL"
-# 22.10 Диас (tg 8553): 1.1.15 выпускаем вручную после одобрения → workflow ставит X5_RELEASE_TYPE=MANUAL.
+# 22.10 Диас (tg 8553): 1.1.15 выпускали вручную (X5_RELEASE_TYPE=MANUAL); 24.10 (tg 9066) 1.1.16 — AFTER_APPROVAL.
 ALLOWED_RELEASE_TYPES = frozenset({"AFTER_APPROVAL", "MANUAL"})
 SAFE_APP_STORE_STATES = frozenset(
     {

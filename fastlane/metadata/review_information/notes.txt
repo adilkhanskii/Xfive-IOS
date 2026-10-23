@@ -1,9 +1,9 @@
-Xfive marketing. Version 1.1.15 build 261.
+Xfive marketing. Version 1.1.16 build 263.
 This update keeps the reviewed 1.1.10 payment safeguards: the selected StoreKit
 product is validated before any purchase success is reported and credit
 confirmation messages stay explicit. This build only changes portfolio video
-upload (videos larger than 47 MB are compressed on device, H.264) and adds
-Settings -> Support links: WhatsApp and the official X5 profile in the app;
+upload (videos go to our video host with resumable upload, no compression) and
+Settings -> Support: "Contact the developer" opens the in-app chat directly;
 prices and charging are unchanged. No Kaspi or external checkout is added; all paid content is
 unlocked only with credits bought through In-App Purchase.
 
