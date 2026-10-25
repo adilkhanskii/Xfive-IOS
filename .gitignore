@@ -44,3 +44,7 @@ secrets.local
 .secrets/
 supabase/.temp/
 .scripts/screens_inbox/
+
+# Review login is supplied only by CI Secrets.
+/fastlane/metadata/review_information/demo_user.txt
+/fastlane/metadata/review_information/demo_password.txt
