@@ -166,37 +166,38 @@ class XFiveMarketingHomeSourceTests(unittest.TestCase):
         self.assertLess(home.index("trendsSection"), home.index("businessSection"))
         self.assertTrue(artwork.exists(), "The AI feature must keep its content artwork")
 
-    def test_sales_banner_is_native_and_opens_the_product_cards_tool(self):
+    def test_product_cards_are_the_first_hero_slide_with_the_client_cover(self):
+        # 26.10 (Адильхан): «Карточки товаров» и «Генерация изображений» поменяли местами.
         home = HOME.read_text(encoding="utf-8")
+        slides = home.split("private var heroSlides", 1)[1].split(
+            "private var imageGenerationCard", 1
+        )[0]
 
-        self.assertIn("struct NativeHomeSalesBannerCard", home)
-        for asset_name in (
-            "ClientProductStepper",
-            "ClientProductHeadphones",
-            "ClientProductGamepad",
-        ):
-            self.assertIn(f'"{asset_name}"', home)
-            imageset = ROOT / "X5" / "Assets.xcassets" / f"{asset_name}.imageset"
-            self.assertTrue((imageset / "Contents.json").exists(), asset_name)
-            self.assertTrue((imageset / f"{asset_name}.jpg").exists(), asset_name)
-        self.assertNotIn('Image("HomeSalesBannerFeature")', home)
-        self.assertNotIn("salesLabel(", home)
-        self.assertIn('Text("Карточки\\nтоваров")', home)
-        # 10.10 (Адильхан): большая «Карточки товаров» снова ведёт в «Продающие баннеры».
-        self.assertIn('handle(imageAction("target_ad"))', home)
+        self.assertNotIn("struct NativeHomeSalesBannerCard", home)
+        self.assertIn('id: "product_cards"', slides)
+        self.assertIn('title: "Карточки\\nтоваров"', slides)
+        self.assertIn('assetName: "HomeCoverSalesBanners"', slides)
+        # большая «Карточки товаров» по-прежнему ведёт в «Продающие баннеры» (Адильхан 10.10)
+        self.assertIn('action: imageAction("target_ad")', slides)
+        self.assertLess(slides.index('id: "product_cards"'), slides.index("isToolAvailable(\"video\")"))
+        self.assertNotIn('id: "image"', slides)
+        imageset = ROOT / "X5" / "Assets.xcassets" / "HomeCoverSalesBanners.imageset"
+        self.assertTrue((imageset / "Contents.json").exists())
+        self.assertTrue((imageset / "HomeCoverSalesBanners.jpg").exists())
 
-    def test_sales_banner_is_immediately_after_ai_influencer_before_tiles(self):
+    def test_image_generation_card_is_after_ai_influencer_before_tiles(self):
         home = HOME.read_text(encoding="utf-8")
         business = home.split("private var businessSection", 1)[1].split(
             "private var trendItems", 1
         )[0]
 
         influencer = business.index("NativeHomeAIInfluencerFeatureCard(")
-        banner = business.index("NativeHomeSalesBannerCard(")
+        image_card = business.index("slide: imageGenerationCard")
         # 09.10: сетки больше нет — одна плитка «Обложки YouTube» во всю ширину.
         tiles = business.index("ForEach(businessItems)")
-        self.assertLess(influencer, banner)
-        self.assertLess(banner, tiles)
+        self.assertLess(influencer, image_card)
+        self.assertLess(image_card, tiles)
+        self.assertIn('.accessibilityIdentifier("x5.home.business.image_generation")', business)
 
     def test_ai_feature_keeps_copy_and_action_as_native_elements(self):
         home = HOME.read_text(encoding="utf-8")
@@ -237,11 +238,11 @@ class XFiveMarketingHomeSourceTests(unittest.TestCase):
         ai_card = home.split(
             "private struct NativeHomeAIInfluencerFeatureCard", 1
         )[1].split("private struct NativeHomeInstagramBackdrop", 1)[0]
-        sales_card = home.split(
-            "private struct NativeHomeSalesBannerCard", 1
-        )[1].split("private struct NativeHomePageDots", 1)[0]
+        hero_card = home.split(
+            "private struct NativeHomeHeroCard", 1
+        )[1].split("private struct NativeHomePromoCard", 1)[0]
 
-        for card in (ai_card, sales_card):
+        for card in (ai_card, hero_card):
             self.assertIn("GeometryReader { proxy in", card)
             self.assertIn("width: proxy.size.width", card)
             self.assertIn("height: proxy.size.height", card)
@@ -317,28 +318,14 @@ class XFiveMarketingHomeSourceTests(unittest.TestCase):
         self.assertIn(".lineLimit(2)", card)
         self.assertIn(".minimumScaleFactor(0.8)", card)
 
-    def test_business_section_and_sales_banner_use_clean_native_chrome(self):
+    def test_business_section_uses_clean_native_chrome(self):
         home = HOME.read_text(encoding="utf-8")
-        sales = home.split("private struct NativeHomeSalesBannerCard", 1)[1].split(
-            "private struct NativeHomePageDots", 1
-        )[0]
 
         self.assertIn("private enum HomeTypography", home)
         self.assertIn(".font(HomeTypography.featureTitle)", home)
         self.assertNotIn("design: .rounded", home)
-        self.assertNotIn("salesLabel(", sales)
-        self.assertIn("LinearGradient(", sales)
-        self.assertIn("ZStack(alignment: .trailing)", sales)
-        self.assertNotIn("ForEach(clientDesigns", sales)
-        self.assertIn('Text("Карточки\\nтоваров")', sales)
-        self.assertIn('Text("Создать")', sales)
-        self.assertIn("clientProductArt(\"ClientProductStepper\")", sales)
-        self.assertIn("clientProductArt(\"ClientProductHeadphones\")", sales)
-        self.assertIn("clientProductArt(\"ClientProductGamepad\")", sales)
-        self.assertIn(".rotationEffect(.degrees(-8))", sales)
-        self.assertIn(".rotationEffect(.degrees(9))", sales)
-        self.assertIn(".scaledToFit()", sales)
-        self.assertNotIn('Image("HomeSalesBannerFeature")', sales)
+        self.assertNotIn("salesLabel(", home)
+        self.assertNotIn('Image("HomeSalesBannerFeature")', home)
 
     def test_search_waits_for_sheet_dismissal_before_routing(self):
         home = HOME.read_text(encoding="utf-8")

@@ -47,7 +47,8 @@ class AdilkhanEdits20261010SourceTests(unittest.TestCase):
         home = read(VIEWS / "Home" / "HomeView.swift")
         self.assertIn(".contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))", home)
         self.assertIn(".contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))", home)
-        self.assertIn('handle(imageAction("target_ad"))', home)
+        # 26.10: «Карточки товаров» — первый слайд, ведёт туда же (target_ad)
+        self.assertIn('action: imageAction("target_ad")', home)
 
     def test_profile_tile_says_hub_tasks_come_an_hour_earlier(self):
         loc = read(ROOT / "X5" / "Services" / "LocalizationService.swift")

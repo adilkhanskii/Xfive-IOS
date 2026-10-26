@@ -1686,28 +1686,37 @@ private struct GenerationAnimationView: View {
     let provider: ImageGenerationProvider
     let category: ImageGenerationCategory
 
-    @State private var rotating = false
-    @State private var pulsing = false
-    @State private var scanning = false
+    /// Сервер не отдаёт ход генерации, поэтому процент считаем по времени с начала —
+    /// как кольцо на сайте/Android. Карточка исчезает, когда пришёл ответ.
+    @State private var startedAt = Date()
 
     var body: some View {
         HStack(spacing: 16) {
-            ZStack {
-                Circle()
-                    .stroke(Color.white.opacity(0.10), lineWidth: 8)
-                Circle()
-                    .trim(from: 0.08, to: 0.72)
-                    .stroke(
-                        LinearGradient(colors: [Color.white, X5Style.blue],
-                                       startPoint: .leading,
-                                       endPoint: .trailing),
-                        style: StrokeStyle(lineWidth: 8, lineCap: .round)
-                    )
-                    .rotationEffect(.degrees(rotating ? 360 : 0))
-                Image(systemName: category.icon)
-                    .font(.system(size: pulsing ? 24 : 20, weight: .bold))
-                    .foregroundColor(.white)
-                    .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: pulsing)
+            // Адильхан 26.10: в центре кольца — процент вместо значка; спиннер и точки убраны.
+            TimelineView(.periodic(from: .now, by: 0.25)) { context in
+                let percent = Self.percent(elapsed: context.date.timeIntervalSince(startedAt))
+                ZStack {
+                    Circle()
+                        .stroke(Color.white.opacity(0.10), lineWidth: 8)
+                    Circle()
+                        .trim(from: 0, to: CGFloat(max(percent, 2)) / 100)
+                        .stroke(
+                            LinearGradient(colors: [Color.white, X5Style.blue],
+                                           startPoint: .leading,
+                                           endPoint: .trailing),
+                            style: StrokeStyle(lineWidth: 8, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90))
+                        .animation(.easeOut(duration: 0.25), value: percent)
+                    Text("\(percent)%")
+                        .font(.system(size: 17, weight: .heavy))
+                        .monospacedDigit()
+                        .foregroundColor(.white)
+                        .minimumScaleFactor(0.7)
+                        .lineLimit(1)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(percent)%")
             }
             .frame(width: 74, height: 74)
 
@@ -1721,54 +1730,23 @@ private struct GenerationAnimationView: View {
                         .font(.system(size: 15, weight: .black))
                         .foregroundColor(Color.accentColor)
                 }
-                Text("\(loc.t("gen_building")) \(localizedCategoryTitle.lowercased())")
+                // было «Собираем » + название категории → «Собираем генерация изображения»
+                Text(loc.t("gen_building_image"))
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.white.opacity(0.58))
-                ProgressView()
-                    .tint(Color.accentColor)
-                    .scaleEffect(x: 1, y: 1.3, anchor: .center)
-                    .padding(.top, 3)
-                generationPulseBars
-                    .padding(.top, 4)
             }
             Spacer()
         }
         .padding(16)
         .x5ClearGlass(cornerRadius: 18, highlight: 0.12)
-        .onAppear {
-            rotating = true
-            pulsing = true
-            scanning = true
-        }
-        .animation(.linear(duration: 1.25).repeatForever(autoreverses: false), value: rotating)
+        .onAppear { startedAt = Date() }
     }
 
-    private var generationPulseBars: some View {
-        HStack(alignment: .bottom, spacing: 4) {
-            ForEach(0..<7, id: \.self) { index in
-                Capsule()
-                    .fill(
-                        LinearGradient(colors: [Color.white.opacity(0.92), X5Style.blue.opacity(0.85)],
-                                       startPoint: .top,
-                                       endPoint: .bottom)
-                    )
-                    .frame(width: 8, height: scanning ? CGFloat(8 + (index % 4) * 5) : 6)
-                    .opacity(scanning ? 0.95 : 0.35)
-                    .animation(
-                        .easeInOut(duration: 0.55)
-                            .repeatForever(autoreverses: true)
-                            .delay(Double(index) * 0.07),
-                        value: scanning
-                    )
-            }
-        }
-        .frame(height: 28, alignment: .bottom)
-    }
-
-    private var localizedCategoryTitle: String {
-        let key = "gen_category_\(category.id)_title"
-        let value = loc.t(key)
-        return value == key ? category.title : value
+    /// 0 → 99 %: быстро в начале и всё медленнее к концу (18 с ≈ 63 %, 40 с ≈ 89 %).
+    /// До 100 % не доходит — 100 % значит «готово», а это знает только ответ сервера.
+    static func percent(elapsed: TimeInterval) -> Int {
+        let value = 100 * (1 - exp(-max(elapsed, 0) / 18))
+        return min(99, max(0, Int(value)))
     }
 }
 

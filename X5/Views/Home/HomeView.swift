@@ -152,13 +152,19 @@ struct HomeView: View {
 
     private var heroSlides: [NativeHomeHero] {
         var slides: [NativeHomeHero] = []
+        // Адильхан 26.10 15:03: «Карточки товаров» и «Генерация изображений» поменяли местами —
+        // карточки первым слайдом, генерация изображений — в «Дизайн для бизнеса» (imageGenerationCard).
         slides.append(NativeHomeHero(
-            id: "image",
-            eyebrow: "X FIVE • AI STUDIO",
-            title: "Генерация\nизображений",
-            subtitle: "Креативы, товары и посты за минуту",
-            assetName: "HomeCoverTargetAds",
-            action: .imageGeneration(ImageGenerationCatalog.custom)
+            id: "product_cards",
+            eyebrow: "X5 • AI STUDIO",
+            title: "Карточки\nтоваров",
+            subtitle: "Готовая инфографика для маркетплейсов",
+            // Обложка — коллаж «Рекламные баннеры… Meta Ads» от Адильхана (WA 26.10 15:05),
+            // обрезан сверху (без заголовка коллажа), чтобы на телефоне были видны баннеры.
+            assetName: "HomeCoverSalesBanners",
+            // ведёт туда же, куда вела большая карточка «Карточки товаров» (Адильхан 10.10)
+            action: imageAction("target_ad"),
+            shadeLeft: true
         ))
         if isToolAvailable("video") {
             slides.append(NativeHomeHero(
@@ -174,6 +180,18 @@ struct HomeView: View {
             slides.append(liveProductsHero)
         }
         return slides
+    }
+
+    /// Бывший первый слайд — теперь карточка в «Дизайн для бизнеса», вид тот же.
+    private var imageGenerationCard: NativeHomeHero {
+        NativeHomeHero(
+            id: "image",
+            eyebrow: "X FIVE • AI STUDIO",
+            title: "Генерация\nизображений",
+            subtitle: "Креативы, товары и посты за минуту",
+            assetName: "HomeCoverTargetAds",
+            action: .imageGeneration(ImageGenerationCatalog.custom)
+        )
     }
 
     private var liveProductsHero: NativeHomeHero {
@@ -262,13 +280,22 @@ struct HomeView: View {
                     .accessibilityIdentifier("x5.home.business.ai_influencer")
                 }
 
-                // Большая «Карточки товаров» снова ведёт в «Продающие баннеры» — как до 09.10.
-                // 09.10 переключили на генератор карточек, но Адильхан 10.10: «интерфейс
-                // поменялся, до этого топ был». Генератор карточек остаётся в трендах (Wildberries) и поиске.
-                NativeHomeSalesBannerCard(
-                    action: { handle(imageAction("target_ad")) }
+                // Адильхан 26.10: здесь была «Карточки товаров» — она ушла первым слайдом наверх,
+                // а сюда встала «Генерация изображений» с тем же видом, что был у слайда.
+                NativeHomeHeroCard(
+                    slide: imageGenerationCard,
+                    pageIndex: 0,
+                    pageCount: 1,
+                    action: { handle(imageGenerationCard.action) }
                 )
-                .accessibilityIdentifier("x5.home.business.sales_banners")
+                .frame(height: HomeLayout.heroHeight)
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                        .allowsHitTesting(false)
+                }
+                .accessibilityIdentifier("x5.home.business.image_generation")
 
                 // Маленькую «Карточки товара» убрали (Адильхан 09.10): она дублировала
                 // большую «Карточки товаров» выше. «Обложки YouTube» осталась одна —
@@ -281,6 +308,7 @@ struct HomeView: View {
                         accent: item.accent,
                         actionTitle: nil,
                         heightOverride: HomeLayout.businessSingleTileHeight,
+                        showsText: !item.coverHasText,
                         action: { handle(item.action) }
                     )
                     .accessibilityIdentifier("x5.home.business.\(item.id)")
@@ -344,9 +372,12 @@ struct HomeView: View {
                 id: "youtube",
                 title: "Обложки YouTube",
                 subtitle: "Больше кликов",
+                // HomeCoverYoutube — коллаж «Обложки для YouTube и Reels» от Адильхана (WA 26.10 15:07).
+                // Заголовок и «Больше кликов» уже на картинке — свой текст поверх не рисуем.
                 assetName: "HomeCoverYoutube",
                 accent: .red,
-                action: imageAction("youtube_cover")
+                action: imageAction("youtube_cover"),
+                coverHasText: true
             )
         ]
     }
@@ -447,6 +478,8 @@ private struct NativeHomeHero: Identifiable {
     let subtitle: String
     let assetName: String
     let action: HomeRoute
+    /// Светлая пёстрая обложка — затемнить слева, чтобы текст слайда читался.
+    var shadeLeft = false
 }
 
 private struct NativeHomeTrend: Identifiable {
@@ -469,6 +502,8 @@ private struct NativeHomeBusiness: Identifiable {
     let assetName: String
     let accent: Color
     let action: HomeRoute
+    /// Текст уже нарисован на обложке — заголовок карточки поверх не нужен.
+    var coverHasText = false
 }
 
 private struct NativeHomeBackground: View {
@@ -513,6 +548,18 @@ private struct NativeHomeHeroCard: View {
                     endPoint: .bottom
                 )
 
+                if slide.shadeLeft {
+                    LinearGradient(
+                        stops: [
+                            .init(color: Color.black.opacity(0.90), location: 0),
+                            .init(color: Color.black.opacity(0.62), location: 0.45),
+                            .init(color: .clear, location: 0.72)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                }
+
                 VStack(alignment: .leading, spacing: 5) {
                     Text(slide.eyebrow)
                         .font(.caption2.weight(.bold))
@@ -546,9 +593,12 @@ private struct NativeHomeHeroCard: View {
                 .padding(16)
                 .padding(.trailing, 48)
 
-                NativeHomePageDots(active: pageIndex, count: pageCount)
-                    .padding(14)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                // одна карточка вне карусели («Генерация изображений» в бизнес-разделе) — без точек
+                if pageCount > 1 {
+                    NativeHomePageDots(active: pageIndex, count: pageCount)
+                        .padding(14)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                }
             }
         }
         .background(.black)
@@ -870,6 +920,8 @@ private struct NativeHomeBusinessCard: View {
     var compact = false
     /// Своя высота для плитки во всю ширину; nil — как раньше.
     var heightOverride: CGFloat? = nil
+    /// false — обложка уже с текстом (YouTube 26.10): без своего заголовка и затемнения.
+    var showsText = true
     let action: () -> Void
 
     private var cardHeight: CGFloat {
@@ -889,33 +941,35 @@ private struct NativeHomeBusinessCard: View {
                     .frame(height: cardHeight)
                     .clipped()
 
-                LinearGradient(
-                    colors: [Color.black.opacity(0.03), Color.black.opacity(0.83)],
-                    startPoint: .center,
-                    endPoint: .bottom
-                )
+                if showsText {
+                    LinearGradient(
+                        colors: [Color.black.opacity(0.03), Color.black.opacity(0.83)],
+                        startPoint: .center,
+                        endPoint: .bottom
+                    )
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(compact ? HomeTypography.compactCardTitle : HomeTypography.cardTitle)
-                        .foregroundColor(.white)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.78)
-                    Text(subtitle)
-                        .font(.caption2.weight(.medium))
-                        .foregroundColor(.white.opacity(0.76))
-                        .lineLimit(2)
-                    if let actionTitle {
-                        Text(actionTitle)
-                            .font(.caption.weight(.bold))
-                            .foregroundColor(.black)
-                            .padding(.horizontal, 14)
-                            .frame(minHeight: 28)
-                            .background(accent, in: Capsule())
-                            .padding(.top, 4)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(title)
+                            .font(compact ? HomeTypography.compactCardTitle : HomeTypography.cardTitle)
+                            .foregroundColor(.white)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.78)
+                        Text(subtitle)
+                            .font(.caption2.weight(.medium))
+                            .foregroundColor(.white.opacity(0.76))
+                            .lineLimit(2)
+                        if let actionTitle {
+                            Text(actionTitle)
+                                .font(.caption.weight(.bold))
+                                .foregroundColor(.black)
+                                .padding(.horizontal, 14)
+                                .frame(minHeight: 28)
+                                .background(accent, in: Capsule())
+                                .padding(.top, 4)
+                        }
                     }
+                    .padding(11)
                 }
-                .padding(11)
 
                 Image(systemName: "arrow.right")
                     .font(.subheadline.weight(.bold))
@@ -1029,121 +1083,6 @@ private struct NativeHomeVoiceCard: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Озвучка. Естественные голоса, эмоции и языки")
         .accessibilityHint("Открывает генератор озвучки")
-    }
-}
-
-private struct NativeHomeSalesBannerCard: View {
-    let action: () -> Void
-
-    private let cornerRadius: CGFloat = 16
-
-    var body: some View {
-        Button(action: action) {
-            GeometryReader { proxy in
-                ZStack(alignment: .trailing) {
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.03, green: 0.03, blue: 0.05),
-                            Color(red: 0.12, green: 0.04, blue: 0.20),
-                            Color(red: 0.02, green: 0.02, blue: 0.04)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-
-                    Circle()
-                        .fill(X5Style.blue.opacity(0.20))
-                        .frame(width: 150, height: 150)
-                        .blur(radius: 36)
-                        .offset(x: 76, y: 50)
-
-                    Circle()
-                        .fill(Color.purple.opacity(0.28))
-                        .frame(width: 118, height: 118)
-                        .blur(radius: 32)
-                        .offset(x: -40, y: -64)
-
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text("X5 • AI STUDIO")
-                            .font(.system(size: 8.5, weight: .bold))
-                            .tracking(1.1)
-                            .foregroundColor(X5Style.blue)
-
-                        Text("Карточки\nтоваров")
-                            .font(HomeTypography.featureTitle)
-                            .foregroundColor(.white)
-
-                        Text("Готовая инфографика\nдля маркетплейсов")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundColor(.white.opacity(0.70))
-                            .lineSpacing(1)
-
-                        HStack(spacing: 7) {
-                            Text("Создать")
-                                .font(.system(size: 11, weight: .bold))
-
-                            Image(systemName: "arrow.right")
-                                .font(.system(size: 9, weight: .bold))
-                        }
-                        .foregroundColor(.black)
-                        .padding(.horizontal, 12)
-                        .frame(height: 29)
-                        .background(X5Style.blue, in: Capsule())
-                    }
-                    .padding(.leading, 17)
-                    .frame(
-                        width: min(166, proxy.size.width * 0.47),
-                        height: proxy.size.height,
-                        alignment: .leading
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    ZStack {
-                        clientProductArt("ClientProductStepper")
-                            .rotationEffect(.degrees(-8))
-                            .offset(x: -58, y: 7)
-                            .zIndex(1)
-
-                        clientProductArt("ClientProductHeadphones")
-                            .rotationEffect(.degrees(3))
-                            .offset(x: -10, y: -5)
-                            .zIndex(2)
-
-                        clientProductArt("ClientProductGamepad")
-                            .rotationEffect(.degrees(9))
-                            .offset(x: 43, y: 5)
-                            .zIndex(3)
-                    }
-                    .frame(width: min(196, proxy.size.width * 0.55), height: proxy.size.height)
-                    .padding(.trailing, 7)
-                }
-                .frame(width: proxy.size.width, height: proxy.size.height)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: HomeLayout.businessWideHeight)
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(Color.white.opacity(0.16), lineWidth: 1)
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Рекламные баннеры с готовыми продающими офферами для таргета и карточки маркетплейсов")
-        .accessibilityHint("Открывает генератор рекламных креативов")
-    }
-
-    private func clientProductArt(_ assetName: String) -> some View {
-        Image(assetName)
-            .resizable()
-            .scaledToFit()
-            .frame(width: 86, height: 126)
-            .background(Color.white.opacity(0.96))
-            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .stroke(Color.white.opacity(0.60), lineWidth: 1)
-            }
-            .shadow(color: .black.opacity(0.46), radius: 8, x: 0, y: 6)
     }
 }
 
