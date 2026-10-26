@@ -19,6 +19,7 @@ on:
       - "supabase/functions/register-push-token/**"
       - "supabase/functions/generate-video/**"
       - "supabase/functions/generate-voice/**"
+      - "supabase/functions/voice-studio/**"
       - "supabase/functions/ai-assets/**"
       - "supabase/functions/ai-capabilities/**"
       - "supabase/functions/ai-character/**"
@@ -285,6 +286,7 @@ jobs:
         run: |
           deno fmt --check \
             supabase/functions/generate-voice \
+            supabase/functions/voice-studio \
             supabase/functions/ai-assets \
             supabase/functions/ai-capabilities \
             supabase/functions/ai-character \
@@ -296,6 +298,7 @@ jobs:
             supabase/functions/account-deletion-cleanup
           deno lint \
             supabase/functions/generate-voice \
+            supabase/functions/voice-studio \
             supabase/functions/ai-assets \
             supabase/functions/ai-capabilities \
             supabase/functions/ai-character \
@@ -308,6 +311,7 @@ jobs:
           deno check \
             supabase/functions/generate-video/index.ts \
             supabase/functions/generate-voice/index.ts \
+            supabase/functions/voice-studio/index.ts \
             supabase/functions/ai-assets/index.ts \
             supabase/functions/ai-capabilities/index.ts \
             supabase/functions/ai-character/index.ts \
@@ -321,6 +325,7 @@ jobs:
           node --test \
             supabase/functions/generate-video/*.test.mjs \
             supabase/functions/generate-voice/*.test.mjs \
+            supabase/functions/voice-studio/*.test.mjs \
             supabase/functions/generate-lipsync/*.test.mjs \
             supabase/functions/voice-generation-webhook/*.test.mjs \
             supabase/functions/account-deletion-cleanup/*.test.mjs \

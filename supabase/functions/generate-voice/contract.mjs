@@ -39,6 +39,18 @@ export const PREMIUM_VOICES = Object.freeze([
   { id: "onwK4e9ZLuTAKqWW03F9", name: "Daniel", gender: "male" },
 ]);
 const PREMIUM_VOICE_IDS = new Set(PREMIUM_VOICES.map((voice) => voice.id));
+// Свои голоса пользователя (клон / по описанию) — тоже ID ElevenLabs. Формат
+// проверяет контракт, владельца — handler через user_voice_owned.
+const PROVIDER_VOICE_ID_PATTERN = /^[A-Za-z0-9]{8,40}$/;
+
+/** Стандартный премиум-голос (не свой). */
+export function isPremadeVoice(voice) {
+  return PREMIUM_VOICE_IDS.has(String(voice || ""));
+}
+
+// Настройки премиума по умолчанию — как у ElevenLabs.
+export const PREMIUM_DEFAULT_SIMILARITY = 0.75;
+export const PREMIUM_DEFAULT_STYLE = 0;
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -122,7 +134,11 @@ export function normalizeVoiceGenerationRequest(body) {
     body.voice || (premium ? PREMIUM_VOICES[0].id : "Russian_BrightHeroine"),
   ).trim();
   // Голоса не смешиваются между тарифами: премиум-ID не уйдёт в MiniMax.
-  if (premium ? !PREMIUM_VOICE_IDS.has(voice) : !SUPPORTED_VOICES.has(voice)) {
+  if (
+    premium
+      ? !PROVIDER_VOICE_ID_PATTERN.test(voice)
+      : !SUPPORTED_VOICES.has(voice)
+  ) {
     throw new VoiceGenerationRequestError("invalid_voice");
   }
 
@@ -151,6 +167,18 @@ export function normalizeVoiceGenerationRequest(body) {
     throw new VoiceGenerationRequestError("invalid_language_code");
   }
 
+  // style и similarity_boost — только у премиума, шаг 0.05 в 0..1.
+  const style = premium
+    ? unitSetting(body.style, PREMIUM_DEFAULT_STYLE, "invalid_style")
+    : null;
+  const similarityBoost = premium
+    ? unitSetting(
+      body.similarity_boost,
+      PREMIUM_DEFAULT_SIMILARITY,
+      "invalid_similarity",
+    )
+    : null;
+
   return {
     requestID,
     tier,
@@ -160,9 +188,24 @@ export function normalizeVoiceGenerationRequest(body) {
     stability,
     speed,
     languageCode,
+    style,
+    similarityBoost,
     outputFormat: VOICE_OUTPUT_FORMAT,
     costCredits: voiceGenerationCost(text, tier),
   };
+}
+
+function unitSetting(value, fallback, code) {
+  const number = value === undefined || value === null
+    ? fallback
+    : Number(value);
+  if (
+    !Number.isFinite(number) || number < 0 || number > 1 ||
+    Math.abs(number * 20 - Math.round(number * 20)) > 1e-9
+  ) {
+    throw new VoiceGenerationRequestError(code);
+  }
+  return Math.round(number * 20) / 20;
 }
 
 export async function buildVoiceGenerationIdentity(normalized) {
@@ -178,7 +221,11 @@ export async function buildVoiceGenerationIdentity(normalized) {
     model: LEGACY_IDENTITY_MODEL,
     // Только премиум добавляет поле: отпечаток обычных запросов не меняется.
     ...(normalized.tier === VOICE_TIERS.premium
-      ? { tier: normalized.tier }
+      ? {
+        tier: normalized.tier,
+        style: normalized.style,
+        similarityBoost: normalized.similarityBoost,
+      }
       : {}),
   }));
   return {

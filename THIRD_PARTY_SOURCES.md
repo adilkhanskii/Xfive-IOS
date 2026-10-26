@@ -296,6 +296,15 @@ bundled in the app.
 - `ELEVENLABS_API_KEY` remains server-only. Without it the function answers
   `premium_unavailable` before any debit and `ai-capabilities` reports
   `tools.voice_premium.available = false`.
+- "Мои голоса" (`voice-studio` function): Instant Voice Cloning
+  `POST /v1/voices/add` (https://elevenlabs.io/docs/api-reference/voices/ivc/create),
+  Voice Design `POST /v1/text-to-voice/design` with `eleven_ttv_v3`
+  (https://elevenlabs.io/docs/api-reference/text-to-voice/design), save preview
+  `POST /v1/text-to-voice` (https://elevenlabs.io/docs/api-reference/text-to-voice/create),
+  delete `DELETE /v1/voices/{voice_id}`, sample links from
+  `GET /v1/voices/{voice_id}` (`preview_url`). Clone samples are forwarded to
+  ElevenLabs only after the user confirms the voice is theirs; X5 keeps only
+  the `voice_id`.
 
 ### fal.ai Sync Lipsync
 

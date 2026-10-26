@@ -76,6 +76,40 @@ enum VoiceGenerationPremiumVoice: String, CaseIterable, Hashable, Identifiable {
         case .daniel: return "Дэниел · дикторский мужской"
         }
     }
+
+    var shortName: String {
+        switch self {
+        case .sarah: return "Sarah"
+        case .matilda: return "Matilda"
+        case .jessica: return "Jessica"
+        case .george: return "George"
+        case .brian: return "Brian"
+        case .daniel: return "Daniel"
+        }
+    }
+
+    var isFemale: Bool {
+        switch self {
+        case .sarah, .matilda, .jessica: return true
+        case .george, .brian, .daniel: return false
+        }
+    }
+}
+
+/// Параметры премиум-озвучки: голос (стандартный или свой) и ручки
+/// эмоциональности / сходства. Стабильность — общий параметр stability.
+struct VoicePremiumOptions: Equatable {
+    static let defaultStyle = 0.0
+    static let defaultSimilarityBoost = 0.75
+
+    let voiceID: String
+    var style: Double = VoicePremiumOptions.defaultStyle
+    var similarityBoost: Double = VoicePremiumOptions.defaultSimilarityBoost
+
+    /// Сервер принимает шаг 0.05 в диапазоне 0…1.
+    static func snap(_ value: Double) -> Double {
+        (min(1, max(0, value)) * 20).rounded() / 20
+    }
 }
 
 enum VoiceGenerationStability: Double, CaseIterable, Hashable, Identifiable {
@@ -206,7 +240,7 @@ enum VoiceGenerationInputFingerprint {
         stability: VoiceGenerationStability,
         speed: Double,
         languageCode: String?,
-        premiumVoice: VoiceGenerationPremiumVoice? = nil
+        premium: VoicePremiumOptions? = nil
     ) -> String {
         let normalizedLanguage = languageCode?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -219,8 +253,10 @@ enum VoiceGenerationInputFingerprint {
             normalizedLanguage
         ]
         // Премиум — отдельный request_id; отпечаток обычных запросов прежний.
-        if let premiumVoice {
-            parts.append("premium:\(premiumVoice.rawValue)")
+        if let premium {
+            parts.append(
+                "premium:\(premium.voiceID):\(VoicePremiumOptions.snap(premium.style)):\(VoicePremiumOptions.snap(premium.similarityBoost))"
+            )
         }
         let value = parts.joined(separator: "\u{001F}")
         let digest = SHA256.hash(data: Data(value.utf8))
@@ -365,8 +401,8 @@ final class VoiceGenerationService {
         return Int(ceil(Double(characterCount) / 1_000.0)) * tier.creditsPerBlock
     }
 
-    /// premiumVoice != nil — премиум-тариф: на сервер уходит tier=premium и ID
-    /// премиум-голоса вместо MiniMax-голоса.
+    /// premium != nil — премиум-тариф: на сервер уходит tier=premium, ID
+    /// премиум-голоса (стандартного или своего) вместо MiniMax и его ручки.
     func generate(
         text: String,
         voice: VoiceGenerationVoice,
@@ -375,7 +411,7 @@ final class VoiceGenerationService {
         languageCode: String?,
         requestID: String,
         accessToken: String,
-        premiumVoice: VoiceGenerationPremiumVoice? = nil
+        premium: VoicePremiumOptions? = nil
     ) async throws -> VoiceGenerationResult {
         let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let characterCount = cleanText.utf16.count
@@ -411,12 +447,16 @@ final class VoiceGenerationService {
 
         let payload = VoiceGenerationRequest(
             text: cleanText,
-            voice: premiumVoice?.rawValue ?? voice.rawValue,
+            voice: premium?.voiceID ?? voice.rawValue,
             stability: stability.rawValue,
             speed: speed,
             languageCode: cleanLanguage?.isEmpty == false ? cleanLanguage : nil,
             requestID: normalizedRequestID,
-            tier: premiumVoice == nil ? nil : VoiceGenerationTier.premium.rawValue
+            tier: premium == nil ? nil : VoiceGenerationTier.premium.rawValue,
+            style: premium.map { VoicePremiumOptions.snap($0.style) },
+            similarityBoost: premium.map {
+                VoicePremiumOptions.snap($0.similarityBoost)
+            }
         )
         let url = baseURL.appendingPathComponent("functions/v1/generate-voice")
         var request = URLRequest(url: url)
@@ -483,7 +523,7 @@ final class VoiceGenerationService {
         languageCode: String?,
         requestID: String,
         accessToken: String,
-        premiumVoice: VoiceGenerationPremiumVoice? = nil,
+        premium: VoicePremiumOptions? = nil,
         refreshAccessToken: @escaping (String) async -> String?
     ) async throws -> VoiceGenerationResult {
         do {
@@ -495,7 +535,7 @@ final class VoiceGenerationService {
                 languageCode: languageCode,
                 requestID: requestID,
                 accessToken: accessToken,
-                premiumVoice: premiumVoice
+                premium: premium
             )
         } catch let error as VoiceGenerationServiceError {
             guard case .server(let statusCode, _, _) = error,
@@ -520,7 +560,7 @@ final class VoiceGenerationService {
                 languageCode: languageCode,
                 requestID: requestID,
                 accessToken: refreshedToken,
-                premiumVoice: premiumVoice
+                premium: premium
             )
         }
     }
@@ -578,6 +618,8 @@ private struct VoiceGenerationRequest: Encodable {
     let requestID: String
     /// nil — поле не отправляется (обычный тариф, как у старых сборок).
     let tier: String?
+    let style: Double?
+    let similarityBoost: Double?
 
     enum CodingKeys: String, CodingKey {
         case text
@@ -587,6 +629,8 @@ private struct VoiceGenerationRequest: Encodable {
         case languageCode = "language_code"
         case requestID = "request_id"
         case tier
+        case style
+        case similarityBoost = "similarity_boost"
     }
 }
 

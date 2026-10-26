@@ -1,6 +1,7 @@
 import {
   buildVoiceGenerationIdentity,
   buildVoiceResultManifest,
+  isPremadeVoice,
   normalizeVoiceGenerationRequest,
   safeVoiceError,
   VoiceGenerationRequestError,
@@ -110,6 +111,21 @@ export function createGenerateVoiceHandler(deps) {
         ),
         503,
       );
+    }
+
+    // Свой голос (клон / по описанию) — только владельцу. Проверяем до
+    // списания: чужой ID — 400 без claim.
+    if (premium && !isPremadeVoice(normalized.voice)) {
+      const owned = await deps.ownsVoice?.({
+        userID: user.id,
+        voiceID: normalized.voice,
+      }).catch(() => null);
+      if (owned !== true) {
+        return json(
+          safeVoiceError("invalid_voice", "Voice request is invalid."),
+          400,
+        );
+      }
     }
 
     const claimToken = createClaimToken();

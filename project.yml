@@ -80,7 +80,7 @@ targets:
         UIUserInterfaceStyle: Dark
         ITSAppUsesNonExemptEncryption: false
         NSFaceIDUsageDescription: "Used to lock Xfive marketing — only the device owner can open the app."
-        NSMicrophoneUsageDescription: "Microphone access is needed to record voice messages in chats."
+        NSMicrophoneUsageDescription: "Microphone access is needed to record voice messages in chats and a voice sample for your own AI voice."
         NSPhotoLibraryUsageDescription: "Select photos and videos for courses, chats, portfolio, and AI tools."
         NSPhotoLibraryAddUsageDescription: "Save generated images and videos to your photo library."
         LSApplicationCategoryType: public.app-category.productivity

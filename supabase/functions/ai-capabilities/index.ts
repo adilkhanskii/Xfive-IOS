@@ -112,6 +112,9 @@ Deno.serve(async (req) => {
       // generate-voice/contract.mjs; списывает всегда сервер.
       voice_per_started_1000_characters: 30,
       voice_premium_per_started_1000_characters: 150,
+      // «Мои голоса» (voice-studio): клон разово, дизайн за набор из 3 превью.
+      voice_clone: 300,
+      voice_design: 50,
       video: { "5": 650, "10": 1200 },
       lipsync_per_second: 50,
     },
@@ -188,6 +191,18 @@ Deno.serve(async (req) => {
           ? null
           : health["elevenlabs:voice"]?.last_error_code ||
             "premium_unavailable",
+      },
+      voice_clone: {
+        available: premiumVoiceAvailable,
+        unavailable_reason: premiumVoiceAvailable
+          ? null
+          : "premium_unavailable",
+      },
+      voice_design: {
+        available: premiumVoiceAvailable,
+        unavailable_reason: premiumVoiceAvailable
+          ? null
+          : "premium_unavailable",
       },
       video: {
         available: videoAvailable,

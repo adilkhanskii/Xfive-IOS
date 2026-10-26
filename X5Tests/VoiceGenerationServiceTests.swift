@@ -122,7 +122,11 @@ final class VoiceGenerationServiceTests: XCTestCase {
             languageCode: "ru",
             requestID: "44444444-4444-4444-8444-444444444444",
             accessToken: "access-token",
-            premiumVoice: .george
+            premium: VoicePremiumOptions(
+                voiceID: VoiceGenerationPremiumVoice.george.rawValue,
+                style: 0.4,
+                similarityBoost: 0.9
+            )
         )
 
         XCTAssertEqual(result.costCredits, 150)
@@ -133,6 +137,14 @@ final class VoiceGenerationServiceTests: XCTestCase {
         )
         XCTAssertEqual(payload["tier"] as? String, "premium")
         XCTAssertEqual(payload["voice"] as? String, "JBFqnCBsd6RMkjVDRZzb")
+        XCTAssertEqual(payload["style"] as? Double, 0.4)
+        XCTAssertEqual(payload["similarity_boost"] as? Double, 0.9)
+    }
+
+    func testPremiumOptionsSnapToServerSteps() {
+        XCTAssertEqual(VoicePremiumOptions.snap(0.33), 0.35)
+        XCTAssertEqual(VoicePremiumOptions.snap(1.4), 1)
+        XCTAssertEqual(VoicePremiumOptions.snap(-0.2), 0)
     }
 
     func testPremiumFingerprintDiffersFromStandard() {
@@ -149,7 +161,9 @@ final class VoiceGenerationServiceTests: XCTestCase {
             stability: .balanced,
             speed: 1,
             languageCode: "ru",
-            premiumVoice: .sarah
+            premium: VoicePremiumOptions(
+                voiceID: VoiceGenerationPremiumVoice.sarah.rawValue
+            )
         )
         XCTAssertNotEqual(standard, premium)
     }

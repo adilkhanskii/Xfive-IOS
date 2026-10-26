@@ -52,7 +52,7 @@
 	<key>NSFaceIDUsageDescription</key>
 	<string>Used to lock Xfive marketing — only the device owner can open the app.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Microphone access is needed to record voice messages in chats.</string>
+	<string>Microphone access is needed to record voice messages in chats and a voice sample for your own AI voice.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Save generated images and videos to your photo library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

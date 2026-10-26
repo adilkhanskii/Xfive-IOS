@@ -82,6 +82,32 @@ class IOSVoiceGenerationSourceTests(unittest.TestCase):
         self.assertIn('"скоро"', view)
         self.assertIn('"premium_unavailable"', service)
 
+    def test_voice_studio_clone_design_and_settings(self):
+        studio = (ROOT / "X5" / "Services" / "VoiceStudioService.swift").read_text(encoding="utf-8")
+        views = (ROOT / "X5" / "Views" / "Home" / "VoiceStudioViews.swift").read_text(encoding="utf-8")
+        view = VIEW.read_text(encoding="utf-8")
+
+        # Только наш сервер; ключ провайдера в приложение не попадает.
+        self.assertIn("functions/v1/voice-studio", studio)
+        self.assertNotRegex(studio + views, r"xi-api-key|api\.elevenlabs\.io|ELEVENLABS_API_KEY")
+        for action in ("catalog", "clone", "design", "save_design", "delete"):
+            self.assertIn(f'"{action}"', studio)
+        # Клон: 30–90 с, до 10 МБ, согласие обязательно.
+        self.assertIn("cloneMinSeconds: TimeInterval = 30", studio)
+        self.assertIn("cloneMaxSeconds: TimeInterval = 90", studio)
+        self.assertIn("cloneMaxBytes = 10 * 1024 * 1024", studio)
+        self.assertIn("guard consent else", studio)
+        # ▶ образца только при ссылке от сервера, иначе «скоро».
+        self.assertIn("if available, let url = voice.previewURL", views)
+        # Теги эмоций eleven_v3 и ползунки премиума.
+        for tag in ("[whispers]", "[laughs]", "[excited]"):
+            self.assertIn(tag, views)
+        for title in ("Эмоциональность", "Сходство с голосом", "По умолчанию"):
+            self.assertIn(title, views)
+        self.assertIn("PremiumVoicePickerView", view)
+        self.assertIn("VoiceCloneSheet", view)
+        self.assertIn("VoiceDesignSheet", view)
+
     def test_ci_and_provenance_include_voice_generation(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         sources = SOURCES.read_text(encoding="utf-8")

@@ -170,3 +170,41 @@ test("fingerprint changes with every billable or audible input", {
   );
   assert.equal(first.fingerprint, explicitStandard.fingerprint);
 });
+
+test("premium style and similarity are bounded, standard ignores them", {
+  skip: !contract,
+}, async () => {
+  const base = {
+    request_id: "22222222-2222-4222-8222-222222222222",
+    text: "Привет",
+    tier: "premium",
+    voice: "JBFqnCBsd6RMkjVDRZzb",
+  };
+  const defaults = contract.normalizeVoiceGenerationRequest(base);
+  assert.equal(defaults.style, 0);
+  assert.equal(defaults.similarityBoost, 0.75);
+  assert.throws(
+    () => contract.normalizeVoiceGenerationRequest({ ...base, style: 1.5 }),
+    /invalid_style/,
+  );
+  assert.throws(
+    () =>
+      contract.normalizeVoiceGenerationRequest({
+        ...base,
+        similarity_boost: 0.33,
+      }),
+    /invalid_similarity/,
+  );
+  const changed = await contract.buildVoiceGenerationIdentity(
+    contract.normalizeVoiceGenerationRequest({ ...base, style: 0.5 }),
+  );
+  const first = await contract.buildVoiceGenerationIdentity(defaults);
+  assert.notEqual(first.fingerprint, changed.fingerprint);
+  const standard = contract.normalizeVoiceGenerationRequest({
+    ...base,
+    tier: "standard",
+    voice: "Russian_BrightHeroine",
+    style: 0.5,
+  });
+  assert.equal(standard.style, null);
+});

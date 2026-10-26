@@ -13,6 +13,15 @@ final class AudioRecorder: NSObject, ObservableObject {
 
     private var recorder: AVAudioRecorder?
     private var ticker: Timer?
+    // Чат — 32 кГц / 32 кбит/с; образец для клона голоса пишем чище (44.1 кГц / 128 кбит/с).
+    private let sampleRate: Int
+    private let bitRate: Int
+
+    init(sampleRate: Int = 32_000, bitRate: Int = 32_000) {
+        self.sampleRate = sampleRate
+        self.bitRate = bitRate
+        super.init()
+    }
     private var isStarting = false
     private var session: AVAudioSession { AVAudioSession.sharedInstance() }
 
@@ -39,10 +48,10 @@ final class AudioRecorder: NSObject, ObservableObject {
             .appendingPathComponent("voice-\(UUID().uuidString.prefix(6)).m4a")
         let settings: [String: Any] = [
             AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-            AVSampleRateKey: 32_000,
+            AVSampleRateKey: sampleRate,
             AVNumberOfChannelsKey: 1,
-            AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue,
-            AVEncoderBitRateKey: 32_000
+            AVEncoderAudioQualityKey: (bitRate > 32_000 ? AVAudioQuality.high : AVAudioQuality.medium).rawValue,
+            AVEncoderBitRateKey: bitRate
         ]
         do {
             let r = try AVAudioRecorder(url: url, settings: settings)

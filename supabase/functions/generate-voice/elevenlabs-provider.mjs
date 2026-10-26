@@ -60,7 +60,8 @@ export class ElevenLabsVoiceProvider {
             // eleven_v3 принимает только 0 / 0.5 / 1 — контракт уже это
             // проверил (Живо / Баланс / Стабильно).
             stability: input.stability,
-            similarity_boost: 0.75,
+            similarity_boost: input.similarityBoost ?? 0.75,
+            style: input.style ?? 0,
             speed: input.speed,
           },
         }),

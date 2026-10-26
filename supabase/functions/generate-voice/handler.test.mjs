@@ -409,3 +409,50 @@ test("premium provider rejection refunds through the claim-bound RPC", async () 
   assert.equal(payload.refunded, true);
   assert.equal(calls.filter(([name]) => name === "fail").length, 1);
 });
+
+test("premium with an own voice checks ownership before any debit", async () => {
+  const owned = [];
+  const { deps, calls } = dependencies({
+    directProviderConfigured: () => true,
+    ownsVoice: async (parameters) => {
+      owned.push(parameters);
+      return false;
+    },
+  });
+  const response = await createGenerateVoiceHandler(deps)(
+    request({ ...premiumBody, voice: "SomeoneElse123" }),
+  );
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error.code, "invalid_voice");
+  assert.deepEqual(owned, [{ userID, voiceID: "SomeoneElse123" }]);
+  assert.equal(calls.filter(([name]) => name === "claim").length, 0);
+});
+
+test("premium with my own voice passes style and similarity to the provider", async () => {
+  const { deps, calls } = dependencies({
+    directProviderConfigured: () => true,
+    ownsVoice: async () => true,
+    generateDirect: async (parameters) => {
+      calls.push(["generate-direct", parameters]);
+      return {
+        provider: "elevenlabs",
+        model: "eleven_v3",
+        requestID: "eleven_req-87654321",
+        audioBytes: Uint8Array.from([0x49, 0x44, 0x33, 1]),
+        audioMimeType: "audio/mpeg",
+      };
+    },
+  });
+  const response = await createGenerateVoiceHandler(deps)(
+    request({
+      ...premiumBody,
+      voice: "MyOwnVoice123",
+      style: 0.4,
+      similarity_boost: 0.9,
+    }),
+  );
+  assert.equal(response.status, 200);
+  const input = calls.find(([name]) => name === "generate-direct")[1].input;
+  assert.equal(input.style, 0.4);
+  assert.equal(input.similarityBoost, 0.9);
+});

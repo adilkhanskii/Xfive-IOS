@@ -41,6 +41,15 @@ Deno.serve(createGenerateVoiceHandler({
   directProviderConfigured: (tier?: string) => providerForTier(tier) !== null,
   generateDirect: (parameters: { input: Record<string, unknown> }) =>
     providerForTier(parameters.input.tier)!.generate(parameters),
+  ownsVoice: async (
+    { userID, voiceID }: { userID: string; voiceID: string },
+  ) => {
+    const result = await backend.rpc("user_voice_owned", {
+      p_user_id: userID,
+      p_provider_voice_id: voiceID,
+    });
+    return result?.owned === true;
+  },
   lookupGeneration: (parameters: Record<string, unknown>) =>
     backend.rpc("lookup_voice_generation_request", parameters),
   claimGeneration: (parameters: Record<string, unknown>) =>

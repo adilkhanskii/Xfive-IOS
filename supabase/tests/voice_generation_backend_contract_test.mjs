@@ -232,3 +232,29 @@ test("tier pricing migration widens the ledger price range to 30..750", () => {
     /grant execute on function public\.claim_voice_generation_request/,
   );
 });
+
+test("voice studio migration: own voices, limit 3, charge after provider success", () => {
+  const sql = fs.readFileSync(
+    path.join(root, "supabase", "migrations", "20261027090000_voice_studio.sql"),
+    "utf8",
+  );
+  assert.match(sql, /create table public\.user_voices/);
+  assert.match(sql, /create table public\.voice_studio_operations/);
+  assert.match(sql, /kind = 'clone' and cost_credits = 300/);
+  assert.match(sql, /kind = 'design' and cost_credits = 50/);
+  assert.match(sql, /kind = 'save' and cost_credits = 0/);
+  assert.match(sql, /v_voices >= 3/);
+  assert.match(sql, /for update/);
+  assert.match(sql, /force row level security/);
+  // Аудио-образцы не храним — только ID голоса.
+  assert.doesNotMatch(sql, /audio_base64|sample_path|storage\.objects/);
+  for (const name of [
+    "voice_studio_quote",
+    "voice_studio_charge",
+    "list_user_voices",
+    "user_voice_owned",
+    "delete_user_voice",
+  ]) {
+    assert.match(sql, new RegExp(`grant execute on function public\.${name}`));
+  }
+});

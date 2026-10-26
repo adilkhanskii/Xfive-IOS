@@ -27,6 +27,13 @@ private enum VoiceGenerationLanguage: String, CaseIterable, Hashable, Identifiab
     }
 }
 
+enum VoiceStudioSheet: String, Identifiable {
+    case clone
+    case design
+
+    var id: String { rawValue }
+}
+
 struct VoiceGeneratorView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var auth: Auth
@@ -35,7 +42,13 @@ struct VoiceGeneratorView: View {
     @State private var text = ""
     @State private var selectedVoice = VoiceGenerationVoice.brightHeroine
     @State private var selectedTier = VoiceGenerationTier.standard
-    @State private var selectedPremiumVoice = VoiceGenerationPremiumVoice.sarah
+    /// Премиум-голос: стандартный ElevenLabs или свой (клон / по описанию).
+    @State private var premiumVoiceID = VoiceGenerationPremiumVoice.sarah.rawValue
+    @State private var premiumSettings = PremiumVoiceSettings.defaults
+    /// Каталог «Мои голоса» с сервера; до ответа — карточки без ▶ и «скоро».
+    @State private var catalog = VoiceStudioCatalog.offline
+    @State private var studioSheet: VoiceStudioSheet?
+    @State private var voicePendingDelete: VoiceStudioMyVoice?
     /// Флаг из ai-capabilities (tools.voice_premium); пока false — «скоро».
     @State private var premiumAvailable = false
     @State private var selectedStability = VoiceGenerationStability.balanced
@@ -58,6 +71,7 @@ struct VoiceGeneratorView: View {
     private let shareFileService = VoiceGenerationShareFileService()
     private let localStore = VoiceGenerationLocalStore()
     private let studioService = AIStudioService()
+    private let voiceStudio = VoiceStudioService()
     private let cardBlue = Color(red: 0.03, green: 0.20, blue: 0.40)
     private let actionBlue = Color(red: 0.10, green: 0.55, blue: 0.98)
     private let actionCyan = Color(red: 0.13, green: 0.83, blue: 0.94)
@@ -67,8 +81,11 @@ struct VoiceGeneratorView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     header
-                    textCard
                     tierCard
+                    if selectedTier == .premium {
+                        premiumVoicesCard
+                    }
+                    textCard
                     settingsCard
                     creditCard
                     generateButton
@@ -105,6 +122,43 @@ struct VoiceGeneratorView: View {
             }
             .task {
                 await loadPremiumAvailability()
+            }
+            .sheet(item: $studioSheet) { sheet in
+                switch sheet {
+                case .clone:
+                    VoiceCloneSheet(
+                        price: catalog.prices.clone,
+                        accessToken: { await auth.freshAccessToken() },
+                        onCreated: { voice, credits in
+                            addMyVoice(voice, creditsRemaining: credits)
+                        }
+                    )
+                case .design:
+                    VoiceDesignSheet(
+                        price: catalog.prices.design,
+                        accessToken: { await auth.freshAccessToken() },
+                        onCredits: { credits in applyStudioCredits(credits) },
+                        onSaved: { voice in addMyVoice(voice, creditsRemaining: nil) }
+                    )
+                }
+            }
+            .confirmationDialog(
+                "Удалить голос «\(voicePendingDelete?.name ?? "")»?",
+                isPresented: Binding(
+                    get: { voicePendingDelete != nil },
+                    set: { if !$0 { voicePendingDelete = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Удалить", role: .destructive) {
+                    if let voice = voicePendingDelete {
+                        deleteMyVoice(voice)
+                    }
+                    voicePendingDelete = nil
+                }
+                Button("Отмена", role: .cancel) {
+                    voicePendingDelete = nil
+                }
             }
             .onDisappear {
                 generationTask?.cancel()
@@ -180,6 +234,11 @@ struct VoiceGeneratorView: View {
         VStack(alignment: .leading, spacing: 12) {
             sectionLabel("Текст")
 
+            // eleven_v3 понимает аудио-теги эмоций: [whispers], [laughs]…
+            if selectedTier == .premium {
+                VoiceAudioTagChips { tag in insertTag(tag) }
+            }
+
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $text)
                     .focused($textFocused)
@@ -228,8 +287,8 @@ struct VoiceGeneratorView: View {
         .disabled(isGenerating)
     }
 
-    // Переключатель «Обычный / Премиум». Премиум без ключа на сервере —
-    // неактивен с пометкой «скоро» (флаг tools.voice_premium).
+    // Переключатель «Обычный / Премиум». Премиум без ключа на сервере можно
+    // открыть и посмотреть голоса, но озвучить нельзя — пометка «скоро».
     private var tierCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             sectionLabel("Качество")
@@ -261,7 +320,6 @@ struct VoiceGeneratorView: View {
         let isSelected = selectedTier == tier
         let isLocked = tier == .premium && !premiumAvailable
         return Button {
-            guard !isLocked else { return }
             selectedTier = tier
         } label: {
             HStack(spacing: 6) {
@@ -280,50 +338,88 @@ struct VoiceGeneratorView: View {
                         .clipShape(Capsule())
                 }
             }
-            .foregroundStyle(.white.opacity(isLocked ? 0.42 : 1))
+            .foregroundStyle(isSelected ? X5Style.ink : .white.opacity(isLocked ? 0.6 : 1))
             .frame(maxWidth: .infinity)
             .frame(height: 44)
-            .background(
-                isSelected
-                    ? AnyShapeStyle(
-                        LinearGradient(
-                            colors: [actionBlue, actionCyan],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    : AnyShapeStyle(Color.clear)
-            )
+            .background(isSelected ? X5Style.blue : Color.clear)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
-        .disabled(isLocked)
         .accessibilityLabel(isLocked ? "\(tier.title), скоро" : tier.title)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private var premiumVoicesCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionLabel("Голос")
+            if !premiumAvailable {
+                HStack(spacing: 8) {
+                    Image(systemName: "sparkles")
+                        .foregroundStyle(X5Style.blue)
+                    Text("Премиум-голоса скоро появятся")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                .padding(.horizontal, 12)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .background(X5Style.blue.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            PremiumVoicePickerView(
+                catalog: catalog,
+                available: premiumAvailable,
+                selectedID: $premiumVoiceID,
+                onDelete: { voice in voicePendingDelete = voice },
+                onClone: { studioSheet = .clone },
+                onDesign: { studioSheet = .design }
+            )
+        }
+        .padding(16)
+        .x5ClearGlass(cornerRadius: 20, highlight: 0.09)
+        .disabled(isGenerating)
     }
 
     private var settingsCard: some View {
         VStack(alignment: .leading, spacing: 16) {
             sectionLabel("Настройки голоса")
 
-            settingRow(title: "Голос", icon: "person.wave.2") {
-                if selectedTier == .premium {
-                    Picker("Голос", selection: $selectedPremiumVoice) {
-                        ForEach(VoiceGenerationPremiumVoice.allCases) { voice in
-                            Text(voice.title).tag(voice)
-                        }
-                    }
-                    .labelsHidden()
-                    .tint(actionCyan)
-                } else {
-                    Picker("Голос", selection: $selectedVoice) {
-                        ForEach(VoiceGenerationVoice.allCases) { voice in
-                            Text(voice.title).tag(voice)
-                        }
-                    }
-                    .labelsHidden()
-                    .tint(actionCyan)
+            if selectedTier == .premium {
+                PremiumVoiceSettingsView(settings: $premiumSettings)
+
+                Divider().overlay(Color.white.opacity(0.10))
+
+                languageRow
+            } else {
+                standardSettings
+            }
+        }
+        .padding(16)
+        .x5ClearGlass(cornerRadius: 20, highlight: 0.09)
+        .disabled(isGenerating)
+    }
+
+    private var languageRow: some View {
+        settingRow(title: "Язык", icon: "globe") {
+            Picker("Язык", selection: $selectedLanguage) {
+                ForEach(VoiceGenerationLanguage.allCases) { language in
+                    Text(language.title).tag(language)
                 }
+            }
+            .labelsHidden()
+            .tint(actionCyan)
+        }
+    }
+
+    @ViewBuilder
+    private var standardSettings: some View {
+            settingRow(title: "Голос", icon: "person.wave.2") {
+                Picker("Голос", selection: $selectedVoice) {
+                    ForEach(VoiceGenerationVoice.allCases) { voice in
+                        Text(voice.title).tag(voice)
+                    }
+                }
+                .labelsHidden()
+                .tint(actionCyan)
             }
 
             Divider().overlay(Color.white.opacity(0.10))
@@ -343,15 +439,7 @@ struct VoiceGeneratorView: View {
 
             Divider().overlay(Color.white.opacity(0.10))
 
-            settingRow(title: "Язык", icon: "globe") {
-                Picker("Язык", selection: $selectedLanguage) {
-                    ForEach(VoiceGenerationLanguage.allCases) { language in
-                        Text(language.title).tag(language)
-                    }
-                }
-                .labelsHidden()
-                .tint(actionCyan)
-            }
+            languageRow
 
             Divider().overlay(Color.white.opacity(0.10))
 
@@ -369,10 +457,6 @@ struct VoiceGeneratorView: View {
                 Slider(value: $speed, in: 0.7...1.2, step: 0.1)
                     .tint(actionBlue)
             }
-        }
-        .padding(16)
-        .x5ClearGlass(cornerRadius: 20, highlight: 0.09)
-        .disabled(isGenerating)
     }
 
     private var creditCard: some View {
@@ -592,11 +676,13 @@ struct VoiceGeneratorView: View {
         auth.userId != nil &&
         (1...VoiceGenerationService.maxCharacters).contains(characterCount) &&
         creditCost > 0 &&
-        hasEnoughCredits
+        hasEnoughCredits &&
+        (selectedTier == .standard || premiumAvailable)
     }
 
     private var generateButtonTitle: String {
         if isGenerating { return "Создаём озвучку…" }
+        if selectedTier == .premium, !premiumAvailable { return "Премиум · скоро" }
         if currentCredits == nil { return "Загружаем баланс…" }
         if characterCount == 0 { return "Введите текст" }
         if characterCount > VoiceGenerationService.maxCharacters {
@@ -626,11 +712,17 @@ struct VoiceGeneratorView: View {
 
         let requestedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let requestedVoice = selectedVoice
-        let requestedStability = selectedStability
-        let requestedSpeed = speed
+        let isPremium = selectedTier == .premium
+        // Премиум берёт стабильность и скорость из своих ползунков.
+        let requestedStability = isPremium ? premiumSettings.stability : selectedStability
+        let requestedSpeed = isPremium ? premiumSettings.speed : speed
         let requestedLanguage = selectedLanguage.requestCode
-        let requestedPremiumVoice = selectedTier == .premium
-            ? selectedPremiumVoice
+        let requestedPremium: VoicePremiumOptions? = isPremium
+            ? VoicePremiumOptions(
+                voiceID: premiumVoiceID,
+                style: premiumSettings.style,
+                similarityBoost: premiumSettings.similarityBoost
+            )
             : nil
         let fingerprint = VoiceGenerationInputFingerprint.make(
             text: requestedText,
@@ -638,7 +730,7 @@ struct VoiceGeneratorView: View {
             stability: requestedStability,
             speed: requestedSpeed,
             languageCode: requestedLanguage,
-            premiumVoice: requestedPremiumVoice
+            premium: requestedPremium
         )
         let requestID = localStore.pendingRequestID(
             for: fingerprint,
@@ -670,7 +762,7 @@ struct VoiceGeneratorView: View {
                     languageCode: requestedLanguage,
                     requestID: requestID,
                     accessToken: token,
-                    premiumVoice: requestedPremiumVoice,
+                    premium: requestedPremium,
                     refreshAccessToken: { rejectedToken in
                         await currentUser.accessTokenForOperation(profileOperation, refresh: {
                             await auth.accessTokenAfterUnauthorized(
@@ -714,17 +806,69 @@ struct VoiceGeneratorView: View {
     }
 
     private func loadPremiumAvailability() async {
-        guard let token = await auth.freshAccessToken(),
-              let capabilities = try? await studioService.capabilities(
-                  accessToken: token
-              )
-        else {
-            return
+        guard let token = await auth.freshAccessToken() else { return }
+        let capabilities = try? await studioService.capabilities(accessToken: token)
+        let loadedCatalog = try? await voiceStudio.catalog(accessToken: token)
+        if let loadedCatalog {
+            catalog = loadedCatalog
         }
-        premiumAvailable = capabilities.tool("voice_premium").available
-        if !premiumAvailable, selectedTier == .premium {
-            selectedTier = .standard
+        // Премиум — только если и флаг, и сам ключ у провайдера принят.
+        premiumAvailable = (capabilities?.tool("voice_premium").available ?? false)
+            && (loadedCatalog?.premiumAvailable ?? false)
+    }
+
+    private func addMyVoice(_ voice: VoiceStudioMyVoice, creditsRemaining: Int?) {
+        if !catalog.myVoices.contains(where: { $0.id == voice.id }) {
+            catalog = VoiceStudioCatalog(
+                premiumAvailable: catalog.premiumAvailable,
+                prices: catalog.prices,
+                voiceLimit: catalog.voiceLimit,
+                premade: catalog.premade,
+                myVoices: catalog.myVoices + [voice]
+            )
         }
+        premiumVoiceID = voice.id
+        if let creditsRemaining {
+            applyStudioCredits(creditsRemaining)
+        }
+        X5Feedback.success()
+    }
+
+    private func applyStudioCredits(_ credits: Int) {
+        guard let userID = auth.userId,
+              let operation = currentUser.operationContext(for: userID)
+        else { return }
+        currentUser.applyCreditsRemaining(credits, for: operation)
+    }
+
+    private func deleteMyVoice(_ voice: VoiceStudioMyVoice) {
+        Task { @MainActor in
+            guard let token = await auth.freshAccessToken() else { return }
+            do {
+                try await voiceStudio.delete(voiceID: voice.id, accessToken: token)
+                catalog = VoiceStudioCatalog(
+                    premiumAvailable: catalog.premiumAvailable,
+                    prices: catalog.prices,
+                    voiceLimit: catalog.voiceLimit,
+                    premade: catalog.premade,
+                    myVoices: catalog.myVoices.filter { $0.id != voice.id }
+                )
+                if premiumVoiceID == voice.id {
+                    premiumVoiceID = VoiceGenerationPremiumVoice.sarah.rawValue
+                }
+            } catch {
+                errorMessage = (error as? LocalizedError)?.errorDescription
+                    ?? VoiceStudioError.transport.localizedDescription
+            }
+        }
+    }
+
+    /// Тег эмоции дописывается в конец текста (у TextEditor нет курсора в API iOS 16).
+    private func insertTag(_ tag: String) {
+        let separator = text.isEmpty || text.hasSuffix(" ") || text.hasSuffix("\n") ? "" : " "
+        let next = text + separator + tag + " "
+        guard next.utf16.count <= VoiceGenerationService.maxCharacters else { return }
+        text = next
     }
 
     private func prepareShareFile(
