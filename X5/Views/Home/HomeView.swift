@@ -180,9 +180,8 @@ struct HomeView: View {
                 action: .videoGeneration
             ))
         }
-        if isToolAvailable("live_products", defaultValue: true) || slides.isEmpty {
-            slides.append(liveProductsHero)
-        }
+        // Адильхан 27.10 01:09: «живые продукты уберем, не нужная тема» — слайд убран из
+        // карусели; сам генератор остался (тренд «Измена клубнички», AI Studio, поиск).
         return slides
     }
 
@@ -195,17 +194,6 @@ struct HomeView: View {
             subtitle: "Креативы, товары и посты за минуту",
             assetName: "HomeCoverTargetAds",
             action: .imageGeneration(ImageGenerationCatalog.custom)
-        )
-    }
-
-    private var liveProductsHero: NativeHomeHero {
-        NativeHomeHero(
-            id: "live_products",
-            eyebrow: "X FIVE • VIDEO TREND",
-            title: "Живые\nпродукты",
-            subtitle: "Видео для Reels и коротких форматов",
-            assetName: "HomeTrendFruitVideo",
-            action: .liveFruits
         )
     }
 
