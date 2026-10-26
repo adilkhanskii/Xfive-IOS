@@ -17,7 +17,7 @@ jobs:
       ASC_API_KEY_BASE64: ${{ secrets.ASC_API_KEY_BASE64 }}
       BUNDLE_ID: com.x5studio.app
       EXPECTED_VERSION: "1.1.17"
-      EXPECTED_BUILD: "264"
+      EXPECTED_BUILD: "265"
       X5_RELEASE_TYPE: "AFTER_APPROVAL"  # 24.10 Диас tg 9066 «Х5 запускай», Адильхан проверил 262: Apple выпускает сама после одобрения
     steps:
       - name: Checkout

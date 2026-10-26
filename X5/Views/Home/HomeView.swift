@@ -42,6 +42,8 @@ private enum HomeLayout {
     static let businessTileHeight: CGFloat = 112
     /// Одна плитка во всю ширину («Обложки YouTube») — как карточка «Озвучка».
     static let businessSingleTileHeight: CGFloat = 148
+    /// Обложка со своим текстом (YouTube 26.10) — пропорция картинки 1400×933.
+    static let textCoverAspect: CGFloat = 3.0 / 2.0
     static let businessWideHeight: CGFloat = 184
     static let voicePromoHeight: CGFloat = 148
     static let sectionSpacing: CGFloat = 14
@@ -159,12 +161,14 @@ struct HomeView: View {
             eyebrow: "X5 • AI STUDIO",
             title: "Карточки\nтоваров",
             subtitle: "Готовая инфографика для маркетплейсов",
-            // Обложка — коллаж «Рекламные баннеры… Meta Ads» от Адильхана (WA 26.10 15:05),
-            // обрезан сверху (без заголовка коллажа), чтобы на телефоне были видны баннеры.
+            // Обложка — коллаж «Рекламные баннеры… Meta Ads» от Адильхана (WA 26.10 15:05).
+            // Адильхан 26.10 16:26: «края срезались», наш текст и «Создать» зачеркнул —
+            // коллаж целиком со своим заголовком, без оверлея; тап по любой точке слайда.
+            // Тексты выше остаются только для VoiceOver.
             assetName: "HomeCoverSalesBanners",
             // ведёт туда же, куда вела большая карточка «Карточки товаров» (Адильхан 10.10)
             action: imageAction("target_ad"),
-            shadeLeft: true
+            fullCover: true
         ))
         if isToolAvailable("video") {
             slides.append(NativeHomeHero(
@@ -478,8 +482,9 @@ private struct NativeHomeHero: Identifiable {
     let subtitle: String
     let assetName: String
     let action: HomeRoute
-    /// Светлая пёстрая обложка — затемнить слева, чтобы текст слайда читался.
-    var shadeLeft = false
+    /// Обложка — готовый баннер со своим текстом: показать целиком (aspect-fit на белом,
+    /// края коллажа белые), без нашего текста и кнопки; нажатие — по всему слайду.
+    var fullCover = false
 }
 
 private struct NativeHomeTrend: Identifiable {
@@ -534,6 +539,37 @@ private struct NativeHomeHeroCard: View {
     let action: () -> Void
 
     var body: some View {
+        if slide.fullCover {
+            fullCoverBody
+        } else {
+            overlayBody
+        }
+    }
+
+    private var fullCoverBody: some View {
+        Button(action: action) {
+            ZStack(alignment: .bottomTrailing) {
+                // цвет краёв коллажа — поля по бокам сливаются с картинкой
+                Color(white: 0.996)
+
+                Image(slide.assetName)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                if pageCount > 1 {
+                    NativeHomePageDots(active: pageIndex, count: pageCount, onLight: true)
+                        .padding(14)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("x5.home.hero.\(slide.id).create")
+        .accessibilityLabel("\(slide.title.replacingOccurrences(of: "\n", with: " ")). \(slide.subtitle)")
+    }
+
+    private var overlayBody: some View {
         GeometryReader { proxy in
             ZStack(alignment: .bottomLeading) {
                 Image(slide.assetName)
@@ -547,18 +583,6 @@ private struct NativeHomeHeroCard: View {
                     startPoint: .top,
                     endPoint: .bottom
                 )
-
-                if slide.shadeLeft {
-                    LinearGradient(
-                        stops: [
-                            .init(color: Color.black.opacity(0.90), location: 0),
-                            .init(color: Color.black.opacity(0.62), location: 0.45),
-                            .init(color: .clear, location: 0.72)
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                }
 
                 VStack(alignment: .leading, spacing: 5) {
                     Text(slide.eyebrow)
@@ -933,12 +957,12 @@ private struct NativeHomeBusinessCard: View {
 
     var body: some View {
         Button(action: action) {
-            ZStack(alignment: .bottomLeading) {
+            sized(ZStack(alignment: .bottomLeading) {
                 Image(assetName)
                     .resizable()
                     .scaledToFill()
                     .frame(maxWidth: .infinity)
-                    .frame(height: cardHeight)
+                    .frame(height: showsText ? cardHeight : nil)
                     .clipped()
 
                 if showsText {
@@ -979,8 +1003,7 @@ private struct NativeHomeBusinessCard: View {
                     .padding(9)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: cardHeight)
+            .frame(maxWidth: .infinity))
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             // Зона нажатия = видимая карточка. clipShape обрезает только картинку,
             // а нажатия ловит вся растянутая scaledToFill-картинка. Широкая «Обложки YouTube»
@@ -994,6 +1017,17 @@ private struct NativeHomeBusinessCard: View {
         .buttonStyle(.plain)
         .accessibilityLabel("\(title). \(subtitle)")
         .accessibilityHint("Открывает соответствующий инструмент")
+    }
+
+    /// Обычная плитка — своя высота. Обложка со своим текстом — целиком, в пропорции
+    /// картинки 3:2: на iPhone у «Обложки YouTube» срезался верх заголовка (Адильхан 26.10 16:26).
+    @ViewBuilder
+    private func sized<Content: View>(_ content: Content) -> some View {
+        if showsText {
+            content.frame(height: cardHeight)
+        } else {
+            content.aspectRatio(HomeLayout.textCoverAspect, contentMode: .fit)
+        }
     }
 }
 
@@ -1089,12 +1123,16 @@ private struct NativeHomeVoiceCard: View {
 private struct NativeHomePageDots: View {
     let active: Int
     let count: Int
+    /// На белом коллаже белые точки не видны — тёмные.
+    var onLight = false
 
     var body: some View {
         HStack(spacing: 6) {
             ForEach(0..<count, id: \.self) { index in
                 Capsule()
-                    .fill(index == active ? .white : .white.opacity(0.42))
+                    .fill(onLight
+                          ? (index == active ? Color.black.opacity(0.78) : Color.black.opacity(0.24))
+                          : (index == active ? .white : .white.opacity(0.42)))
                     .frame(width: index == active ? 22 : 7, height: 7)
             }
         }

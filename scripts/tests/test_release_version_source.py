@@ -65,11 +65,11 @@ class ReleaseVersionSourceTests(unittest.TestCase):
         # 22.10: 1.1.14 (259) в продаже → 1.1.15 (261): видео портфолио сжимается до 47 МБ + поддержка WhatsApp/X5 (Адильхан 22.10).
         # 23.10: TestFlight 262 («Связаться с разработчиком» — сразу чат, понятная почта);
         # на проверке Apple остаётся 261 (очередь не теряем), поэтому ниже цель ревью — 261.
-        # 26.10: 1.1.16 (263) в продаже → 1.1.17 (264); сборка и цель ревью — одно число.
-        self.assertEqual(runtime_build_number, "264")
+        # 26.10: 1.1.16 (263) в продаже → 1.1.17 (265); сборка и цель ревью — одно число.
+        self.assertEqual(runtime_build_number, "265")
         self.assertEqual(fastlane_version, marketing_version)
         self.assertIn(
-            f"Version {marketing_version} build 264",
+            f"Version {marketing_version} build 265",
             review_notes,
         )
         self.assertIn(
@@ -77,7 +77,7 @@ class ReleaseVersionSourceTests(unittest.TestCase):
             submit_workflow,
         )
         self.assertIn(
-            'EXPECTED_BUILD: "264"',
+            'EXPECTED_BUILD: "265"',
             submit_workflow,
         )
         self.assertIn(
@@ -85,7 +85,7 @@ class ReleaseVersionSourceTests(unittest.TestCase):
             prepare_workflow,
         )
         self.assertIn(
-            'BUILD_NUMBER: "264"',
+            'BUILD_NUMBER: "265"',
             prepare_workflow,
         )
 

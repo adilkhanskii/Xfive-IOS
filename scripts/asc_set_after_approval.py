@@ -9,7 +9,7 @@ from typing import Protocol
 
 
 EXPECTED_VERSION = "1.1.17"
-EXPECTED_BUILD = "264"  # 26.10: 1.1.16 (263) в продаже; 1.1.17 (264) = главная «Карточки товаров» первым слайдом, новые обложки, процент в карточке генерации
+EXPECTED_BUILD = "265"  # 26.10: 1.1.16 (263) в продаже; 1.1.17: 264 снята с проверки, 265 = коллаж «Карточки товаров» целиком, тап по слайду, YouTube 3:2
 TARGET_RELEASE_TYPE = "AFTER_APPROVAL"
 # 22.10 Диас (tg 8553): 1.1.15 выпускали вручную (X5_RELEASE_TYPE=MANUAL); 24.10 (tg 9066) 1.1.16 и 1.1.17 — AFTER_APPROVAL.
 ALLOWED_RELEASE_TYPES = frozenset({"AFTER_APPROVAL", "MANUAL"})
