@@ -34,6 +34,10 @@ struct VoiceGeneratorView: View {
 
     @State private var text = ""
     @State private var selectedVoice = VoiceGenerationVoice.brightHeroine
+    @State private var selectedTier = VoiceGenerationTier.standard
+    @State private var selectedPremiumVoice = VoiceGenerationPremiumVoice.sarah
+    /// Флаг из ai-capabilities (tools.voice_premium); пока false — «скоро».
+    @State private var premiumAvailable = false
     @State private var selectedStability = VoiceGenerationStability.balanced
     @State private var selectedLanguage = VoiceGenerationLanguage.automatic
     @State private var speed = 1.0
@@ -53,6 +57,7 @@ struct VoiceGeneratorView: View {
     private let service = VoiceGenerationService()
     private let shareFileService = VoiceGenerationShareFileService()
     private let localStore = VoiceGenerationLocalStore()
+    private let studioService = AIStudioService()
     private let cardBlue = Color(red: 0.03, green: 0.20, blue: 0.40)
     private let actionBlue = Color(red: 0.10, green: 0.55, blue: 0.98)
     private let actionCyan = Color(red: 0.13, green: 0.83, blue: 0.94)
@@ -63,6 +68,7 @@ struct VoiceGeneratorView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     header
                     textCard
+                    tierCard
                     settingsCard
                     creditCard
                     generateButton
@@ -96,6 +102,9 @@ struct VoiceGeneratorView: View {
             }
             .task {
                 await refreshProfile()
+            }
+            .task {
+                await loadPremiumAvailability()
             }
             .onDisappear {
                 generationTask?.cancel()
@@ -219,18 +228,102 @@ struct VoiceGeneratorView: View {
         .disabled(isGenerating)
     }
 
+    // Переключатель «Обычный / Премиум». Премиум без ключа на сервере —
+    // неактивен с пометкой «скоро» (флаг tools.voice_premium).
+    private var tierCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionLabel("Качество")
+
+            HStack(spacing: 8) {
+                ForEach(VoiceGenerationTier.allCases) { tier in
+                    tierButton(tier)
+                }
+            }
+            .padding(4)
+            .background(Color.white.opacity(0.055))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            Text(
+                selectedTier == .premium
+                    ? "Студийный голос, живые эмоции · \(VoiceGenerationTier.premium.creditsPerBlock) кредитов за 1000 символов"
+                    : "Быстро и недорого · \(VoiceGenerationTier.standard.creditsPerBlock) кредитов за 1000 символов"
+            )
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.52))
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .x5ClearGlass(cornerRadius: 20, highlight: 0.09)
+        .disabled(isGenerating)
+    }
+
+    private func tierButton(_ tier: VoiceGenerationTier) -> some View {
+        let isSelected = selectedTier == tier
+        let isLocked = tier == .premium && !premiumAvailable
+        return Button {
+            guard !isLocked else { return }
+            selectedTier = tier
+        } label: {
+            HStack(spacing: 6) {
+                if tier == .premium {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 13, weight: .bold))
+                }
+                Text(tier.title)
+                    .font(.system(size: 15, weight: .black))
+                if isLocked {
+                    Text("скоро")
+                        .font(.system(size: 10, weight: .black))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color.white.opacity(0.12))
+                        .clipShape(Capsule())
+                }
+            }
+            .foregroundStyle(.white.opacity(isLocked ? 0.42 : 1))
+            .frame(maxWidth: .infinity)
+            .frame(height: 44)
+            .background(
+                isSelected
+                    ? AnyShapeStyle(
+                        LinearGradient(
+                            colors: [actionBlue, actionCyan],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    : AnyShapeStyle(Color.clear)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(isLocked)
+        .accessibilityLabel(isLocked ? "\(tier.title), скоро" : tier.title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
     private var settingsCard: some View {
         VStack(alignment: .leading, spacing: 16) {
             sectionLabel("Настройки голоса")
 
             settingRow(title: "Голос", icon: "person.wave.2") {
-                Picker("Голос", selection: $selectedVoice) {
-                    ForEach(VoiceGenerationVoice.allCases) { voice in
-                        Text(voice.title).tag(voice)
+                if selectedTier == .premium {
+                    Picker("Голос", selection: $selectedPremiumVoice) {
+                        ForEach(VoiceGenerationPremiumVoice.allCases) { voice in
+                            Text(voice.title).tag(voice)
+                        }
                     }
+                    .labelsHidden()
+                    .tint(actionCyan)
+                } else {
+                    Picker("Голос", selection: $selectedVoice) {
+                        ForEach(VoiceGenerationVoice.allCases) { voice in
+                            Text(voice.title).tag(voice)
+                        }
+                    }
+                    .labelsHidden()
+                    .tint(actionCyan)
                 }
-                .labelsHidden()
-                .tint(actionCyan)
             }
 
             Divider().overlay(Color.white.opacity(0.10))
@@ -482,7 +575,7 @@ struct VoiceGeneratorView: View {
     }
 
     private var creditCost: Int {
-        VoiceGenerationService.creditCost(for: text)
+        VoiceGenerationService.creditCost(for: text, tier: selectedTier)
     }
 
     private var currentCredits: Int? {
@@ -536,12 +629,16 @@ struct VoiceGeneratorView: View {
         let requestedStability = selectedStability
         let requestedSpeed = speed
         let requestedLanguage = selectedLanguage.requestCode
+        let requestedPremiumVoice = selectedTier == .premium
+            ? selectedPremiumVoice
+            : nil
         let fingerprint = VoiceGenerationInputFingerprint.make(
             text: requestedText,
             voice: requestedVoice,
             stability: requestedStability,
             speed: requestedSpeed,
-            languageCode: requestedLanguage
+            languageCode: requestedLanguage,
+            premiumVoice: requestedPremiumVoice
         )
         let requestID = localStore.pendingRequestID(
             for: fingerprint,
@@ -573,6 +670,7 @@ struct VoiceGeneratorView: View {
                     languageCode: requestedLanguage,
                     requestID: requestID,
                     accessToken: token,
+                    premiumVoice: requestedPremiumVoice,
                     refreshAccessToken: { rejectedToken in
                         await currentUser.accessTokenForOperation(profileOperation, refresh: {
                             await auth.accessTokenAfterUnauthorized(
@@ -602,10 +700,30 @@ struct VoiceGeneratorView: View {
             } catch is CancellationError {
                 return
             } catch {
+                // Сервер сказал «премиум пока нет» — гасим переключатель.
+                if case .server(_, let code, _)? = error as? VoiceGenerationServiceError,
+                   code == "premium_unavailable" {
+                    premiumAvailable = false
+                    selectedTier = .standard
+                }
                 errorMessage = (error as? LocalizedError)?.errorDescription
                     ?? VoiceGenerationServiceError.transport.localizedDescription
                 X5Feedback.warning()
             }
+        }
+    }
+
+    private func loadPremiumAvailability() async {
+        guard let token = await auth.freshAccessToken(),
+              let capabilities = try? await studioService.capabilities(
+                  accessToken: token
+              )
+        else {
+            return
+        }
+        premiumAvailable = capabilities.tool("voice_premium").available
+        if !premiumAvailable, selectedTier == .premium {
+            selectedTier = .standard
         }
     }
 

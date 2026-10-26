@@ -11,14 +11,38 @@ Required server-only environment:
 - `SUPABASE_URL`
 - `SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
-- `MINIMAX_API_KEY` (preferred official provider)
+- `MINIMAX_API_KEY` (standard tier, official MiniMax)
+- `ELEVENLABS_API_KEY` (optional, premium tier, official ElevenLabs `eleven_v3`)
 - `FAL_KEY` only while legacy queued jobs still exist
 
 No value is supplied by this repository. Provider keys must belong to the X5
 server environment. Never substitute a client key, invent a credential, or copy
-any provider key into the app. Every new job uses MiniMax Speech 2.8 Turbo
-directly. There is no ElevenLabs fallback. Legacy fal queue handling remains
-only so an already accepted historical request can be reconciled safely.
+any provider key into the app. Standard jobs ("Обычный", no `tier` or
+`tier: "standard"`) use MiniMax Speech 2.8 Turbo directly, 30 credits per
+started 1000 characters. Premium jobs (`tier: "premium"`) use the official
+ElevenLabs API with `eleven_v3` and one of six premade voice IDs, 150 credits
+per started 1000 characters. There is no fallback between tiers. Legacy fal
+queue handling remains only so an already accepted historical request can be
+reconciled safely.
+
+## Premium voice (ElevenLabs) rollout
+
+1. Apply `20261026120000_voice_premium_tier_pricing.sql` (ledger price range
+   30..750, step 30). It must land **before** the new function code: the old
+   check rejects 30 and 150..750 and returns `invalid_request`.
+2. Deploy `generate-voice` and `ai-capabilities`. Without the secret, premium
+   answers `premium_unavailable` (503) before any debit, and the apps show
+   "Премиум · скоро".
+3. To turn premium on, set the server secret and redeploy both functions:
+
+```sh
+supabase secrets set ELEVENLABS_API_KEY=<value from the ElevenLabs dashboard>
+supabase functions deploy generate-voice
+supabase functions deploy ai-capabilities
+```
+
+Rollback: `supabase secrets unset ELEVENLABS_API_KEY` and redeploy both
+functions; premium switches back to "скоро" with no data change.
 
 Mandatory order:
 

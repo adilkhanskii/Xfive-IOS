@@ -10,10 +10,35 @@ export const VOICE_RESULT_MODELS = Object.freeze({
 });
 export const VOICE_OUTPUT_FORMAT = "mp3_44100_128";
 export const CUSTOMER_PRICE_MULTIPLIER = 2;
-export const VOICE_PROVIDER_COST_PER_1000_CHARACTERS = 30;
-export const VOICE_CREDITS_PER_1000_CHARACTERS =
-  VOICE_PROVIDER_COST_PER_1000_CHARACTERS * CUSTOMER_PRICE_MULTIPLIER;
+// Тарифы озвучки (план владельца 26.10): обычный — MiniMax, премиум —
+// ElevenLabs eleven_v3. Цена за каждую начатую 1000 символов.
+export const VOICE_TIERS = Object.freeze({
+  standard: "standard",
+  premium: "premium",
+});
+export const VOICE_CREDITS_PER_1000_CHARACTERS = 30;
+export const PREMIUM_VOICE_CREDITS_PER_1000_CHARACTERS = 150;
+export const VOICE_TIER_CREDITS_PER_1000_CHARACTERS = Object.freeze({
+  standard: VOICE_CREDITS_PER_1000_CHARACTERS,
+  premium: PREMIUM_VOICE_CREDITS_PER_1000_CHARACTERS,
+});
 export const VOICE_MAX_CHARACTERS = 5_000;
+
+// Премиум-голоса — стандартные (default/premade) голоса ElevenLabs: доступны
+// любому ключу без Voice Library, мультиязычные, работают с eleven_v3 на
+// русском. ID — из официального списка ElevenLabs (GET /v1/voices,
+// category=premade; George — пример в доке text-to-speech/convert).
+export const PREMIUM_VOICES = Object.freeze([
+  // женские
+  { id: "EXAVITQu4vr4xnSDxMaL", name: "Sarah", gender: "female" },
+  { id: "XrExE9yKIg1WjnnlVkGX", name: "Matilda", gender: "female" },
+  { id: "cgSgspJ2msm6clMCkdW9", name: "Jessica", gender: "female" },
+  // мужские
+  { id: "JBFqnCBsd6RMkjVDRZzb", name: "George", gender: "male" },
+  { id: "nPczCjzI2devNBz1zQrb", name: "Brian", gender: "male" },
+  { id: "onwK4e9ZLuTAKqWW03F9", name: "Daniel", gender: "male" },
+]);
+const PREMIUM_VOICE_IDS = new Set(PREMIUM_VOICES.map((voice) => voice.id));
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -61,13 +86,14 @@ export class VoiceGenerationRequestError extends Error {
   }
 }
 
-export function voiceGenerationCost(text) {
+export function voiceGenerationCost(text, tier = VOICE_TIERS.standard) {
   const characterCount = String(text || "").length;
   if (characterCount <= 0 || characterCount > VOICE_MAX_CHARACTERS) {
     throw new VoiceGenerationRequestError("invalid_text");
   }
-  return Math.ceil(characterCount / 1_000) *
-    VOICE_CREDITS_PER_1000_CHARACTERS;
+  const perBlock = VOICE_TIER_CREDITS_PER_1000_CHARACTERS[tier];
+  if (!perBlock) throw new VoiceGenerationRequestError("invalid_tier");
+  return Math.ceil(characterCount / 1_000) * perBlock;
 }
 
 export function normalizeVoiceGenerationRequest(body) {
@@ -86,8 +112,17 @@ export function normalizeVoiceGenerationRequest(body) {
     throw new VoiceGenerationRequestError("invalid_text");
   }
 
-  const voice = String(body.voice || "Russian_BrightHeroine").trim();
-  if (!SUPPORTED_VOICES.has(voice)) {
+  // Нет поля tier — старые сборки: обычный тариф, как раньше.
+  const tier = String(body.tier || VOICE_TIERS.standard).trim().toLowerCase();
+  if (!Object.hasOwn(VOICE_TIERS, tier)) {
+    throw new VoiceGenerationRequestError("invalid_tier");
+  }
+  const premium = tier === VOICE_TIERS.premium;
+  const voice = String(
+    body.voice || (premium ? PREMIUM_VOICES[0].id : "Russian_BrightHeroine"),
+  ).trim();
+  // Голоса не смешиваются между тарифами: премиум-ID не уйдёт в MiniMax.
+  if (premium ? !PREMIUM_VOICE_IDS.has(voice) : !SUPPORTED_VOICES.has(voice)) {
     throw new VoiceGenerationRequestError("invalid_voice");
   }
 
@@ -118,6 +153,7 @@ export function normalizeVoiceGenerationRequest(body) {
 
   return {
     requestID,
+    tier,
     text,
     characterCount,
     voice,
@@ -125,7 +161,7 @@ export function normalizeVoiceGenerationRequest(body) {
     speed,
     languageCode,
     outputFormat: VOICE_OUTPUT_FORMAT,
-    costCredits: voiceGenerationCost(text),
+    costCredits: voiceGenerationCost(text, tier),
   };
 }
 
@@ -140,6 +176,10 @@ export async function buildVoiceGenerationIdentity(normalized) {
     outputFormat: normalized.outputFormat,
     costCredits: normalized.costCredits,
     model: LEGACY_IDENTITY_MODEL,
+    // Только премиум добавляет поле: отпечаток обычных запросов не меняется.
+    ...(normalized.tier === VOICE_TIERS.premium
+      ? { tier: normalized.tier }
+      : {}),
   }));
   return {
     requestKey: `explicit:${requestDigest}`,

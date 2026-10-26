@@ -59,6 +59,29 @@ class IOSVoiceGenerationSourceTests(unittest.TestCase):
         self.assertIn("VoiceGenerationService", source)
         self.assertIn("applyCreditsRemaining", source)
 
+    def test_premium_tier_is_server_gated_and_priced_like_the_contract(self):
+        service = SERVICE.read_text(encoding="utf-8")
+        view = VIEW.read_text(encoding="utf-8")
+        contract = (
+            ROOT / "supabase" / "functions" / "generate-voice" / "contract.mjs"
+        ).read_text(encoding="utf-8")
+
+        # Цены клиента = цены сервера (обычный 30, премиум 150 за 1000).
+        self.assertIn("case .standard: return 30", service)
+        self.assertIn("case .premium: return 150", service)
+        self.assertIn("VOICE_CREDITS_PER_1000_CHARACTERS = 30", contract)
+        self.assertIn("PREMIUM_VOICE_CREDITS_PER_1000_CHARACTERS = 150", contract)
+        # Все премиум-голоса приложения принимает сервер.
+        import re
+        ids = re.findall(r'case \w+ = "([A-Za-z0-9]{20})"', service)
+        self.assertEqual(len(ids), 6)
+        for voice_id in ids:
+            self.assertIn(f'"{voice_id}"', contract)
+        # Премиум включается только флагом ai-capabilities, иначе «скоро».
+        self.assertIn('tool("voice_premium")', view)
+        self.assertIn('"скоро"', view)
+        self.assertIn('"premium_unavailable"', service)
+
     def test_ci_and_provenance_include_voice_generation(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         sources = SOURCES.read_text(encoding="utf-8")

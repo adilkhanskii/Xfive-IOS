@@ -31,6 +31,53 @@ enum VoiceGenerationVoice: String, CaseIterable, Hashable, Identifiable {
     static let aria = VoiceGenerationVoice.brightHeroine
 }
 
+/// Тариф озвучки: обычный — MiniMax, премиум — студийный eleven_v3 на сервере.
+enum VoiceGenerationTier: String, CaseIterable, Hashable, Identifiable {
+    case standard
+    case premium
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .standard: return "Обычный"
+        case .premium: return "Премиум"
+        }
+    }
+
+    /// Кредиты за каждую начатую 1000 символов — как в generate-voice/contract.mjs.
+    var creditsPerBlock: Int {
+        switch self {
+        case .standard: return 30
+        case .premium: return 150
+        }
+    }
+}
+
+/// Премиум-голоса — стандартные (premade) голоса провайдера; ID берутся из
+/// его официального списка голосов и совпадают с PREMIUM_VOICES на сервере.
+enum VoiceGenerationPremiumVoice: String, CaseIterable, Hashable, Identifiable {
+    case sarah = "EXAVITQu4vr4xnSDxMaL"
+    case matilda = "XrExE9yKIg1WjnnlVkGX"
+    case jessica = "cgSgspJ2msm6clMCkdW9"
+    case george = "JBFqnCBsd6RMkjVDRZzb"
+    case brian = "nPczCjzI2devNBz1zQrb"
+    case daniel = "onwK4e9ZLuTAKqWW03F9"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .sarah: return "Сара · мягкий женский"
+        case .matilda: return "Матильда · тёплый женский"
+        case .jessica: return "Джессика · живой женский"
+        case .george: return "Джордж · бархатный мужской"
+        case .brian: return "Брайан · глубокий мужской"
+        case .daniel: return "Дэниел · дикторский мужской"
+        }
+    }
+}
+
 enum VoiceGenerationStability: Double, CaseIterable, Hashable, Identifiable {
     case expressive = 0
     case balanced = 0.5
@@ -131,6 +178,8 @@ enum VoiceGenerationServiceError: LocalizedError, Equatable {
         switch code {
         case "insufficient_credits":
             return "Недостаточно кредитов для этой озвучки."
+        case "premium_unavailable":
+            return "Премиум-озвучка скоро появится. Кредиты не списаны — выберите «Обычный»."
         case "generation_in_progress", "generation_status_pending":
             return "Озвучка ещё обрабатывается. Нажмите «Повторить», чтобы проверить результат."
         case "refund_pending":
@@ -156,18 +205,24 @@ enum VoiceGenerationInputFingerprint {
         voice: VoiceGenerationVoice,
         stability: VoiceGenerationStability,
         speed: Double,
-        languageCode: String?
+        languageCode: String?,
+        premiumVoice: VoiceGenerationPremiumVoice? = nil
     ) -> String {
         let normalizedLanguage = languageCode?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased() ?? ""
-        let value = [
+        var parts = [
             text.trimmingCharacters(in: .whitespacesAndNewlines),
             voice.rawValue,
             String(stability.rawValue),
             String(format: "%.1f", speed),
             normalizedLanguage
-        ].joined(separator: "\u{001F}")
+        ]
+        // Премиум — отдельный request_id; отпечаток обычных запросов прежний.
+        if let premiumVoice {
+            parts.append("premium:\(premiumVoice.rawValue)")
+        }
+        let value = parts.joined(separator: "\u{001F}")
         let digest = SHA256.hash(data: Data(value.utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
     }
@@ -251,7 +306,7 @@ final class VoiceGenerationLocalStore {
 
 final class VoiceGenerationService {
     static let maxCharacters = 5_000
-    static let creditsPerBlock = 60
+    static let creditsPerBlock = VoiceGenerationTier.standard.creditsPerBlock
     static let maxPendingPolls = 60
 
     private let session: URLSession
@@ -300,13 +355,18 @@ final class VoiceGenerationService {
         self.decoder = decoder
     }
 
-    static func creditCost(for text: String) -> Int {
+    static func creditCost(
+        for text: String,
+        tier: VoiceGenerationTier = .standard
+    ) -> Int {
         let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let characterCount = cleanText.utf16.count
         guard characterCount > 0 else { return 0 }
-        return Int(ceil(Double(characterCount) / 1_000.0)) * creditsPerBlock
+        return Int(ceil(Double(characterCount) / 1_000.0)) * tier.creditsPerBlock
     }
 
+    /// premiumVoice != nil — премиум-тариф: на сервер уходит tier=premium и ID
+    /// премиум-голоса вместо MiniMax-голоса.
     func generate(
         text: String,
         voice: VoiceGenerationVoice,
@@ -314,7 +374,8 @@ final class VoiceGenerationService {
         speed: Double,
         languageCode: String?,
         requestID: String,
-        accessToken: String
+        accessToken: String,
+        premiumVoice: VoiceGenerationPremiumVoice? = nil
     ) async throws -> VoiceGenerationResult {
         let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let characterCount = cleanText.utf16.count
@@ -350,11 +411,12 @@ final class VoiceGenerationService {
 
         let payload = VoiceGenerationRequest(
             text: cleanText,
-            voice: voice.rawValue,
+            voice: premiumVoice?.rawValue ?? voice.rawValue,
             stability: stability.rawValue,
             speed: speed,
             languageCode: cleanLanguage?.isEmpty == false ? cleanLanguage : nil,
-            requestID: normalizedRequestID
+            requestID: normalizedRequestID,
+            tier: premiumVoice == nil ? nil : VoiceGenerationTier.premium.rawValue
         )
         let url = baseURL.appendingPathComponent("functions/v1/generate-voice")
         var request = URLRequest(url: url)
@@ -421,6 +483,7 @@ final class VoiceGenerationService {
         languageCode: String?,
         requestID: String,
         accessToken: String,
+        premiumVoice: VoiceGenerationPremiumVoice? = nil,
         refreshAccessToken: @escaping (String) async -> String?
     ) async throws -> VoiceGenerationResult {
         do {
@@ -431,7 +494,8 @@ final class VoiceGenerationService {
                 speed: speed,
                 languageCode: languageCode,
                 requestID: requestID,
-                accessToken: accessToken
+                accessToken: accessToken,
+                premiumVoice: premiumVoice
             )
         } catch let error as VoiceGenerationServiceError {
             guard case .server(let statusCode, _, _) = error,
@@ -455,7 +519,8 @@ final class VoiceGenerationService {
                 speed: speed,
                 languageCode: languageCode,
                 requestID: requestID,
-                accessToken: refreshedToken
+                accessToken: refreshedToken,
+                premiumVoice: premiumVoice
             )
         }
     }
@@ -511,6 +576,8 @@ private struct VoiceGenerationRequest: Encodable {
     let speed: Double
     let languageCode: String?
     let requestID: String
+    /// nil — поле не отправляется (обычный тариф, как у старых сборок).
+    let tier: String?
 
     enum CodingKeys: String, CodingKey {
         case text
@@ -519,6 +586,7 @@ private struct VoiceGenerationRequest: Encodable {
         case speed
         case languageCode = "language_code"
         case requestID = "request_id"
+        case tier
     }
 }
 

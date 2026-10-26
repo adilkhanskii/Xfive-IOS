@@ -15,6 +15,10 @@ const configured = Object.freeze({
   openai: Boolean(String(Deno.env.get("OPENAI_API_KEY") || "").trim()),
   google: Boolean(String(Deno.env.get("GEMINI_API_KEY") || "").trim()),
   minimax: Boolean(String(Deno.env.get("MINIMAX_API_KEY") || "").trim()),
+  // Премиум-озвучка: без ключа приложения показывают «Премиум · скоро».
+  elevenlabs: Boolean(
+    String(Deno.env.get("ELEVENLABS_API_KEY") || "").trim(),
+  ),
   byteplus: Boolean(String(Deno.env.get("ARK_API_KEY") || "").trim()),
   fal: Boolean(String(Deno.env.get("FAL_KEY") || "").trim()),
 });
@@ -90,6 +94,7 @@ Deno.serve(async (req) => {
   const googleImageAvailable = providerAvailable("google", "image");
   const imageAvailable = openAIImageAvailable || googleImageAvailable;
   const voiceAvailable = providerAvailable("minimax", "voice");
+  const premiumVoiceAvailable = providerAvailable("elevenlabs", "voice");
   const videoAvailable = providerAvailable("byteplus", "video");
   const lipsyncAvailable = providerAvailable("fal", "lipsync");
   const imageUnavailableReason = imageAvailable
@@ -103,7 +108,10 @@ Deno.serve(async (req) => {
     customer_price_multiplier: 2,
     prices: {
       image_frame: 60,
-      voice_per_started_1000_characters: 60,
+      // Обычный тариф (MiniMax) и премиум (ElevenLabs) — как в
+      // generate-voice/contract.mjs; списывает всегда сервер.
+      voice_per_started_1000_characters: 30,
+      voice_premium_per_started_1000_characters: 150,
       video: { "5": 650, "10": 1200 },
       lipsync_per_second: 50,
     },
@@ -120,9 +128,14 @@ Deno.serve(async (req) => {
           ]
           : []),
       ],
-      voice: voiceAvailable
-        ? [{ id: "speech-2.8-turbo", provider: "minimax" }]
-        : [],
+      voice: [
+        ...(voiceAvailable
+          ? [{ id: "speech-2.8-turbo", provider: "minimax" }]
+          : []),
+        ...(premiumVoiceAvailable
+          ? [{ id: "eleven_v3", provider: "elevenlabs" }]
+          : []),
+      ],
       video: videoAvailable
         ? [{ id: "seedance-2.0-fast", provider: "byteplus" }]
         : [],
@@ -168,6 +181,13 @@ Deno.serve(async (req) => {
           ? null
           : health["minimax:voice"]?.last_error_code ||
             "provider_not_configured",
+      },
+      voice_premium: {
+        available: premiumVoiceAvailable,
+        unavailable_reason: premiumVoiceAvailable
+          ? null
+          : health["elevenlabs:voice"]?.last_error_code ||
+            "premium_unavailable",
       },
       video: {
         available: videoAvailable,

@@ -59,6 +59,8 @@ final class VoiceGenerationServiceTests: XCTestCase {
         )
         XCTAssertEqual(payload["text"] as? String, "Озвучь этот рекламный текст")
         XCTAssertEqual(payload["voice"] as? String, "Russian_BrightHeroine")
+        // Обычный тариф не шлёт tier — как старые сборки.
+        XCTAssertNil(payload["tier"])
         XCTAssertEqual(payload["stability"] as? Double, 0.5)
         XCTAssertEqual(payload["speed"] as? Double, 1)
         XCTAssertEqual(payload["language_code"] as? String, "ru")
@@ -69,15 +71,87 @@ final class VoiceGenerationServiceTests: XCTestCase {
     }
 
     func testCostMatchesServerBlocks() {
-        XCTAssertEqual(VoiceGenerationService.creditCost(for: "a"), 60)
+        XCTAssertEqual(VoiceGenerationService.creditCost(for: "a"), 30)
         XCTAssertEqual(
             VoiceGenerationService.creditCost(for: String(repeating: "a", count: 1_000)),
-            60
+            30
         )
         XCTAssertEqual(
             VoiceGenerationService.creditCost(for: String(repeating: "a", count: 1_001)),
-            120
+            60
         )
+        XCTAssertEqual(
+            VoiceGenerationService.creditCost(for: "a", tier: .premium),
+            150
+        )
+        XCTAssertEqual(
+            VoiceGenerationService.creditCost(
+                for: String(repeating: "a", count: 5_000),
+                tier: .premium
+            ),
+            750
+        )
+    }
+
+    func testPremiumSendsTierAndPremiumVoiceID() async throws {
+        let recorder = VoiceGenerationRequestRecorder()
+        let service = makeService(recorder: recorder) { request in
+            (
+                Self.response(for: request, statusCode: 200),
+                Data(
+                    """
+                    {
+                      "audio_url": "https://project.supabase.co/storage/v1/object/sign/audio",
+                      "audio_url_expires_at": "2026-07-26T12:15:00.000Z",
+                      "credits_remaining": 850,
+                      "cost_credits": 150,
+                      "voice": "JBFqnCBsd6RMkjVDRZzb",
+                      "model": "eleven_v3",
+                      "replayed": false
+                    }
+                    """.utf8
+                )
+            )
+        }
+
+        let result = try await service.generate(
+            text: "Премиум озвучка",
+            voice: .brightHeroine,
+            stability: .balanced,
+            speed: 1,
+            languageCode: "ru",
+            requestID: "44444444-4444-4444-8444-444444444444",
+            accessToken: "access-token",
+            premiumVoice: .george
+        )
+
+        XCTAssertEqual(result.costCredits, 150)
+        let request = try XCTUnwrap(recorder.lastRequest)
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: try XCTUnwrap(request.httpBody))
+                as? [String: Any]
+        )
+        XCTAssertEqual(payload["tier"] as? String, "premium")
+        XCTAssertEqual(payload["voice"] as? String, "JBFqnCBsd6RMkjVDRZzb")
+    }
+
+    func testPremiumFingerprintDiffersFromStandard() {
+        let standard = VoiceGenerationInputFingerprint.make(
+            text: "Текст",
+            voice: .brightHeroine,
+            stability: .balanced,
+            speed: 1,
+            languageCode: "ru"
+        )
+        let premium = VoiceGenerationInputFingerprint.make(
+            text: "Текст",
+            voice: .brightHeroine,
+            stability: .balanced,
+            speed: 1,
+            languageCode: "ru",
+            premiumVoice: .sarah
+        )
+        XCTAssertNotEqual(standard, premium)
     }
 
     func testRejectsInvalidInputBeforeNetwork() async {

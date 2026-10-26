@@ -1,5 +1,7 @@
 // Authenticated client entrypoint for official MiniMax voice jobs.
 // Required provider env: MINIMAX_API_KEY.
+// Optional premium env: ELEVENLABS_API_KEY (tier "premium", eleven_v3).
+// Без него премиум отвечает premium_unavailable без списания.
 // FAL_KEY is read only to let already-bound legacy queue jobs finish.
 // Required env: SUPABASE_URL, SUPABASE_ANON_KEY,
 // SUPABASE_SERVICE_ROLE_KEY.
@@ -7,6 +9,7 @@
 import { VoiceGenerationBackend } from "./backend.mjs";
 import { FalVoiceQueueProvider } from "./fal-provider.mjs";
 import { DirectVoiceProvider } from "./direct-provider.mjs";
+import { ElevenLabsVoiceProvider } from "./elevenlabs-provider.mjs";
 import { createGenerateVoiceHandler } from "./handler.mjs";
 
 const supabaseURL = requiredEnvironment("SUPABASE_URL");
@@ -14,6 +17,7 @@ const anonKey = requiredEnvironment("SUPABASE_ANON_KEY");
 const serviceRoleKey = requiredEnvironment("SUPABASE_SERVICE_ROLE_KEY");
 const falKey = Deno.env.get("FAL_KEY") || "";
 const minimaxKey = Deno.env.get("MINIMAX_API_KEY") || "";
+const elevenLabsKey = Deno.env.get("ELEVENLABS_API_KEY") || "";
 const backend = new VoiceGenerationBackend({
   supabaseURL,
   serviceRoleKey,
@@ -24,13 +28,19 @@ const provider = falKey.trim()
 const directProvider = minimaxKey.trim()
   ? new DirectVoiceProvider({ minimaxKey })
   : null;
+const premiumProvider = elevenLabsKey.trim()
+  ? new ElevenLabsVoiceProvider({ apiKey: elevenLabsKey })
+  : null;
+const isPremium = (tier: unknown) => tier === "premium";
+const providerForTier = (tier: unknown) =>
+  isPremium(tier) ? premiumProvider : directProvider;
 
 Deno.serve(createGenerateVoiceHandler({
   verifyUser,
-  providerConfigured: () => directProvider !== null,
-  directProviderConfigured: () => directProvider !== null,
+  providerConfigured: (tier?: string) => providerForTier(tier) !== null,
+  directProviderConfigured: (tier?: string) => providerForTier(tier) !== null,
   generateDirect: (parameters: { input: Record<string, unknown> }) =>
-    directProvider!.generate(parameters),
+    providerForTier(parameters.input.tier)!.generate(parameters),
   lookupGeneration: (parameters: Record<string, unknown>) =>
     backend.rpc("lookup_voice_generation_request", parameters),
   claimGeneration: (parameters: Record<string, unknown>) =>
@@ -88,12 +98,13 @@ Deno.serve(createGenerateVoiceHandler({
   recordProviderHealth: (
     success: boolean,
     errorCode: string | null = null,
+    tier: string = "standard",
   ) =>
     backend.rpc("record_ai_provider_health", {
-      p_provider: "minimax",
+      p_provider: isPremium(tier) ? "elevenlabs" : "minimax",
       p_capability: "voice",
       p_success: success,
-      p_model: "speech-2.8-turbo",
+      p_model: isPremium(tier) ? "eleven_v3" : "speech-2.8-turbo",
       p_error_code: errorCode,
     }),
 }));

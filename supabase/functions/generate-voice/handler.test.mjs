@@ -321,3 +321,91 @@ test("completion racing account deletion removes the just-stored object", async 
   assert.equal(response.status, 425);
   assert.equal(calls.filter(([name]) => name === "delete").length, 1);
 });
+
+const premiumBody = {
+  ...requestBody,
+  request_id: "33333333-3333-4333-8333-333333333333",
+  tier: "premium",
+  voice: "EXAVITQu4vr4xnSDxMaL",
+};
+
+test("premium without ELEVENLABS_API_KEY answers premium_unavailable and never debits", async () => {
+  const { deps, calls } = dependencies({
+    directProviderConfigured: (tier) => tier !== "premium",
+  });
+  const response = await createGenerateVoiceHandler(deps)(
+    request(premiumBody),
+  );
+  const payload = await response.json();
+  assert.equal(response.status, 503);
+  assert.equal(payload.error.code, "premium_unavailable");
+  assert.deepEqual(calls, []);
+});
+
+test("premium debits 150 per 1000 and generates through ElevenLabs only", async () => {
+  const healths = [];
+  const { deps, calls } = dependencies({
+    directProviderConfigured: () => true,
+    generateDirect: async (parameters) => {
+      calls.push(["generate-direct", parameters]);
+      return {
+        provider: "elevenlabs",
+        model: "eleven_v3",
+        requestID: "eleven_req-12345678",
+        audioBytes: Uint8Array.from([0x49, 0x44, 0x33, 1]),
+        audioMimeType: "audio/mpeg",
+      };
+    },
+    recordProviderHealth: async (...args) => healths.push(args),
+  });
+  const response = await createGenerateVoiceHandler(deps)(
+    request(premiumBody),
+  );
+  const payload = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(payload.model, "eleven_v3");
+  assert.equal(payload.cost_credits, 150);
+  assert.equal(calls.find(([name]) => name === "claim")[1].p_cost_credits, 150);
+  assert.equal(
+    calls.find(([name]) => name === "generate-direct")[1].input.tier,
+    "premium",
+  );
+  assert.equal(calls.filter(([name]) => name === "submit").length, 0);
+  const manifest = calls.find(([name]) => name === "complete-provider")[1]
+    .p_result_manifest;
+  assert.equal(manifest.provider, "elevenlabs");
+  assert.equal(manifest.model, "eleven_v3");
+  assert.deepEqual(healths, [[true, null, "premium"]]);
+});
+
+test("standard request keeps MiniMax and debits 30 per 1000", async () => {
+  const { deps, calls } = dependencies({
+    directProviderConfigured: (tier) => tier === "standard",
+  });
+  const response = await createGenerateVoiceHandler(deps)(request());
+  const payload = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(payload.model, "speech-2.8-turbo");
+  assert.equal(payload.cost_credits, 30);
+  assert.equal(calls.find(([name]) => name === "claim")[1].p_cost_credits, 30);
+  assert.equal(
+    calls.find(([name]) => name === "generate-direct")[1].input.tier,
+    "standard",
+  );
+});
+
+test("premium provider rejection refunds through the claim-bound RPC", async () => {
+  const { deps, calls } = dependencies({
+    directProviderConfigured: () => true,
+    generateDirect: async () => {
+      throw Object.assign(new Error("elevenlabs_rejected"), { terminal: true });
+    },
+  });
+  const response = await createGenerateVoiceHandler(deps)(
+    request(premiumBody),
+  );
+  const payload = await response.json();
+  assert.equal(response.status, 503);
+  assert.equal(payload.refunded, true);
+  assert.equal(calls.filter(([name]) => name === "fail").length, 1);
+});

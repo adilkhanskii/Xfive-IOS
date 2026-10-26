@@ -269,12 +269,33 @@ bundled in the app.
 - Model: `speech-2.8-turbo`.
 - Verified in production: 2026-08-25 with Russian, Kazakh and English text.
 - Use: server-side speech generation from user-supplied text with a selected
-  MiniMax voice, speed and language hint. ElevenLabs is not used for new jobs.
+  MiniMax voice, speed and language hint. This is the standard ("Обычный")
+  voice tier: 30 credits per started 1000 characters.
 - Integration: the authenticated Edge Function charges through the exact-once
   ledger, calls MiniMax once, validates the returned MP3, copies it into private
   owner-scoped X5 Storage and returns only a short-lived signed link.
   `MINIMAX_API_KEY` remains server-only. Historical fal/ElevenLabs queue code is
   retained solely to finish or re-sign requests accepted by older app builds.
+
+### ElevenLabs Text to Speech (premium voice tier)
+
+- Production HTTP endpoint:
+  https://api.elevenlabs.io/v1/text-to-speech/{voice_id}?output_format=mp3_44100_128
+- API reference: https://elevenlabs.io/docs/api-reference/text-to-speech/convert
+- Model: `eleven_v3`. Stability accepts only 0, 0.5 and 1 (matches the X5
+  "Живо / Баланс / Стабильно" choice).
+- Voices: six ElevenLabs default (premade) voices, multilingual and available
+  to every API key without Voice Library: Sarah `EXAVITQu4vr4xnSDxMaL`,
+  Matilda `XrExE9yKIg1WjnnlVkGX`, Jessica `cgSgspJ2msm6clMCkdW9`, George
+  `JBFqnCBsd6RMkjVDRZzb`, Brian `nPczCjzI2devNBz1zQrb`, Daniel
+  `onwK4e9ZLuTAKqWW03F9` (IDs from the ElevenLabs voices list,
+  `category=premade`).
+- Use: the premium ("Премиум") voice tier, 150 credits per started 1000
+  characters, charged through the same exact-once ledger. Direct API only; the
+  legacy fal queue is never used for premium.
+- `ELEVENLABS_API_KEY` remains server-only. Without it the function answers
+  `premium_unavailable` before any debit and `ai-capabilities` reports
+  `tools.voice_premium.available = false`.
 
 ### fal.ai Sync Lipsync
 

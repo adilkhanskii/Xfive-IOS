@@ -26,12 +26,16 @@ struct AIStudioCapabilities: Decodable, Equatable {
     struct Prices: Decodable, Equatable {
         let imageFrame: Int
         let voicePerStarted1000Characters: Int
+        /// Премиум-озвучка; nil у сервера до выкатки премиума.
+        let voicePremiumPerStarted1000Characters: Int?
         let video: [String: Int]
         let lipsyncPerSecond: Int
 
         enum CodingKeys: String, CodingKey {
             case imageFrame = "image_frame"
             case voicePerStarted1000Characters = "voice_per_started_1000_characters"
+            case voicePremiumPerStarted1000Characters =
+                "voice_premium_per_started_1000_characters"
             case video
             case lipsyncPerSecond = "lipsync_per_second"
         }

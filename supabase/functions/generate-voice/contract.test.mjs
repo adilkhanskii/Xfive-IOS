@@ -36,7 +36,8 @@ test("normalizes a supported MiniMax request and computes bounded credits", {
   assert.equal(normalized.speed, 1);
   assert.equal(normalized.languageCode, "ru");
   assert.equal(normalized.outputFormat, "mp3_44100_128");
-  assert.equal(normalized.costCredits, 60);
+  assert.equal(normalized.tier, "standard");
+  assert.equal(normalized.costCredits, 30);
   assert.equal(normalized.characterCount, normalized.text.length);
 
   const identity = await contract.buildVoiceGenerationIdentity(normalized);
@@ -44,13 +45,64 @@ test("normalizes a supported MiniMax request and computes bounded credits", {
   assert.match(identity.fingerprint, /^[0-9a-f]{64}$/);
 });
 
-test("charges 60 credits for every started 1000-character block", {
+test("charges 30 credits for every started 1000-character block", {
   skip: !contract,
 }, () => {
-  assert.equal(contract.voiceGenerationCost("a"), 60);
-  assert.equal(contract.voiceGenerationCost("a".repeat(1_000)), 60);
-  assert.equal(contract.voiceGenerationCost("a".repeat(1_001)), 120);
-  assert.equal(contract.voiceGenerationCost("a".repeat(5_000)), 300);
+  assert.equal(contract.voiceGenerationCost("a"), 30);
+  assert.equal(contract.voiceGenerationCost("a".repeat(1_000)), 30);
+  assert.equal(contract.voiceGenerationCost("a".repeat(1_001)), 60);
+  assert.equal(contract.voiceGenerationCost("a".repeat(5_000)), 150);
+});
+
+test("premium charges 150 credits for every started 1000-character block", {
+  skip: !contract,
+}, () => {
+  assert.equal(contract.voiceGenerationCost("a", "premium"), 150);
+  assert.equal(contract.voiceGenerationCost("a".repeat(1_000), "premium"), 150);
+  assert.equal(contract.voiceGenerationCost("a".repeat(1_001), "premium"), 300);
+  assert.equal(contract.voiceGenerationCost("a".repeat(5_000), "premium"), 750);
+});
+
+test("premium accepts only the six ElevenLabs voices and never MiniMax IDs", {
+  skip: !contract,
+}, () => {
+  assert.equal(contract.PREMIUM_VOICES.length, 6);
+  assert.equal(
+    contract.PREMIUM_VOICES.filter((voice) => voice.gender === "female").length,
+    3,
+  );
+  const base = {
+    request_id: "22222222-2222-4222-8222-222222222222",
+    text: "Привет",
+    tier: "premium",
+  };
+  const normalized = contract.normalizeVoiceGenerationRequest({
+    ...base,
+    voice: "JBFqnCBsd6RMkjVDRZzb",
+  });
+  assert.equal(normalized.tier, "premium");
+  assert.equal(normalized.costCredits, 150);
+  assert.throws(
+    () =>
+      contract.normalizeVoiceGenerationRequest({
+        ...base,
+        voice: "Russian_BrightHeroine",
+      }),
+    /invalid_voice/,
+  );
+  assert.throws(
+    () =>
+      contract.normalizeVoiceGenerationRequest({
+        ...base,
+        tier: "standard",
+        voice: "JBFqnCBsd6RMkjVDRZzb",
+      }),
+    /invalid_voice/,
+  );
+  assert.throws(
+    () => contract.normalizeVoiceGenerationRequest({ ...base, tier: "gold" }),
+    /invalid_tier/,
+  );
 });
 
 test("rejects unsupported voices, malformed request IDs, and oversized text", {
@@ -111,4 +163,10 @@ test("fingerprint changes with every billable or audible input", {
 
   assert.notEqual(first.fingerprint, changedVoice.fingerprint);
   assert.notEqual(first.fingerprint, changedText.fingerprint);
+
+  // Явный "standard" = старый запрос без tier: тот же отпечаток.
+  const explicitStandard = await contract.buildVoiceGenerationIdentity(
+    contract.normalizeVoiceGenerationRequest({ ...base, tier: "standard" }),
+  );
+  assert.equal(first.fingerprint, explicitStandard.fingerprint);
 });

@@ -85,8 +85,23 @@ export function createGenerateVoiceHandler(deps) {
         deps,
       }).catch(() => resultUnavailable());
     }
-    if (!deps.providerConfigured()) {
+    const premium = normalized.tier === "premium";
+    // Премиум — только прямой ElevenLabs (никогда fal/MiniMax). Нет ключа —
+    // понятная ошибка до claim, кредиты не списываются.
+    const tierReady = premium
+      ? deps.directProviderConfigured?.(normalized.tier) === true
+      : deps.providerConfigured(normalized.tier);
+    if (!tierReady) {
       if (existing?.status === "processing") return pendingResponse();
+      if (premium) {
+        return json(
+          safeVoiceError(
+            "premium_unavailable",
+            "Premium voice is not available yet.",
+          ),
+          503,
+        );
+      }
       return json(
         safeVoiceError(
           "voice_unavailable",
@@ -156,7 +171,9 @@ export function createGenerateVoiceHandler(deps) {
         return pendingResponse();
       }
       if (isDirectProviderRequest(providerRequestID)) {
-        if (!deps.directProviderConfigured?.()) return pendingResponse();
+        if (!deps.directProviderConfigured?.(normalized.tier)) {
+          return pendingResponse();
+        }
         return await runDirectGeneration({
           normalized,
           ledger: {
@@ -189,7 +206,7 @@ export function createGenerateVoiceHandler(deps) {
       return creditUnavailable();
     }
 
-    if (deps.directProviderConfigured?.()) {
+    if (deps.directProviderConfigured?.(normalized.tier)) {
       return await runDirectGeneration({
         normalized,
         ledger: {
@@ -435,9 +452,11 @@ async function runDirectGeneration({ normalized, ledger, deps }) {
     const failure = ledger.providerRequestID
       ? await settleProviderFailure({ ledger, deps })
       : await rejectDirectClaim({ ledger, deps });
-    await deps.recordProviderHealth?.(false, "provider_failure").catch(() =>
-      null
-    );
+    await deps.recordProviderHealth?.(
+      false,
+      "provider_failure",
+      normalized.tier,
+    ).catch(() => null);
     return failedResponse(failure);
   }
 
@@ -486,7 +505,9 @@ async function runDirectGeneration({ normalized, ledger, deps }) {
     deps,
   });
   if (finalized.status !== "completed") return pendingResponse();
-  await deps.recordProviderHealth?.(true, null).catch(() => null);
+  await deps.recordProviderHealth?.(true, null, normalized.tier).catch(() =>
+    null
+  );
   return await signedResponse({
     userID: ledger.userID,
     normalized,

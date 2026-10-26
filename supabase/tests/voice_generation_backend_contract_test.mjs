@@ -58,7 +58,7 @@ test("voice backend and exact-once migration exist", () => {
   assert.equal(fs.existsSync(sqlIntegrationTestPath), true);
 });
 
-test("new voice jobs use official MiniMax only and keep credentials server-side", () => {
+test("standard voice uses MiniMax, premium uses direct ElevenLabs, keys stay server-side", () => {
   assert.equal(fs.existsSync(path.join(functionDirectory, "index.ts")), true);
   assert.equal(
     fs.existsSync(path.join(functionDirectory, "fal-provider.mjs")),
@@ -83,10 +83,19 @@ test("new voice jobs use official MiniMax only and keep credentials server-side"
     "utf8",
   );
 
+  const premium = fs.readFileSync(
+    path.join(functionDirectory, "elevenlabs-provider.mjs"),
+    "utf8",
+  );
+
   assert.match(edge, /Deno\.env\.get\("MINIMAX_API_KEY"\)/);
-  assert.doesNotMatch(edge, /Deno\.env\.get\("ELEVENLABS_API_KEY"\)/);
+  // Премиум (26.10): ключ ElevenLabs — только серверный секрет функции.
+  assert.match(edge, /Deno\.env\.get\("ELEVENLABS_API_KEY"\)/);
   assert.match(provider, /https:\/\/api\.minimax\.io\/v1\/t2a_v2/);
   assert.doesNotMatch(provider, /api\.elevenlabs\.io/i);
+  assert.match(premium, /https:\/\/api\.elevenlabs\.io\/v1\/text-to-speech/);
+  assert.match(premium, /eleven_v3/);
+  assert.doesNotMatch(premium, /fal\.run|api\.minimax\.io/);
   assert.doesNotMatch(
     swift,
     /MINIMAX_API_KEY|ELEVENLABS_API_KEY|api\.minimax\.io|api\.elevenlabs\.io/i,
@@ -201,4 +210,25 @@ test("SQL integration regression covers replay, lost submit, and deletion races"
   ]) {
     assert.match(sqlTest, new RegExp(fragment, "i"));
   }
+});
+
+test("tier pricing migration widens the ledger price range to 30..750", () => {
+  const sql = fs.readFileSync(
+    path.join(
+      root,
+      "supabase",
+      "migrations",
+      "20261026120000_voice_premium_tier_pricing.sql",
+    ),
+    "utf8",
+  );
+  assert.match(sql, /cost_credits between 30 and 750/);
+  assert.match(sql, /cost_credits % 30 = 0/);
+  assert.match(sql, /p_cost_credits not between 30 and 750/);
+  assert.match(sql, /p_cost_credits % 30 <> 0/);
+  assert.doesNotMatch(sql, /% 60/);
+  assert.match(
+    sql,
+    /grant execute on function public\.claim_voice_generation_request/,
+  );
 });
