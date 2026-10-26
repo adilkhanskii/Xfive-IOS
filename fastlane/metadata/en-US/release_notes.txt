@@ -1,1 +1,1 @@
-Portfolio videos now upload in full quality and resume after a lost connection. Settings → Support: "Contact the developer" opens the chat right away. Minor fixes.
+New home screen order and fresh covers. Generation progress shown in percent. Minor fixes.

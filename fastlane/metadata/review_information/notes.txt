@@ -1,9 +1,9 @@
-Xfive marketing. Version 1.1.16 build 263.
+Xfive marketing. Version 1.1.17 build 264.
 This update keeps the reviewed 1.1.10 payment safeguards: the selected StoreKit
 product is validated before any purchase success is reported and credit
-confirmation messages stay explicit. This build only changes portfolio video
-upload (videos go to our video host with resumable upload, no compression) and
-Settings -> Support: "Contact the developer" opens the in-app chat directly;
+confirmation messages stay explicit. This build only changes the home screen
+layout (order of feature cards and new cover images) and shows generation
+progress as a percentage on the generation card;
 prices and charging are unchanged. No Kaspi or external checkout is added; all paid content is
 unlocked only with credits bought through In-App Purchase.
 
