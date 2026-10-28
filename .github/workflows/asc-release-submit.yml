@@ -61,13 +61,22 @@ jobs:
           app = get(f"/apps?filter[bundleId]={os.environ['BUNDLE_ID']}")["data"][0]
           versions = get(f"/apps/{app['id']}/appStoreVersions?filter[platform]=IOS&limit=50")["data"]
           version = next(v for v in versions if v["attributes"]["versionString"] == os.environ["EXPECTED_VERSION"])
-          decl = get(f"/appStoreVersions/{version['id']}/ageRatingDeclaration")["data"]
-          print("age rating before:", json.dumps(decl["attributes"], sort_keys=True))
-          if decl["attributes"].get("socialMedia") is not None:
-              print("socialMedia already set")
-              raise SystemExit(0)
           if version["attributes"]["appStoreState"] != "PREPARE_FOR_SUBMISSION":
               print("version not editable, skip")
+              raise SystemExit(0)
+          # Рейтинг теперь висит на appInfo (у версии связи нет). Берём редактируемый appInfo;
+          # если не нашли — id из ошибки Apple совпадает с id версии.
+          decl = None
+          for info in get(f"/apps/{app['id']}/appInfos")["data"]:
+              st = info["attributes"].get("appStoreState") or info["attributes"].get("state")
+              print("appInfo", info["id"], st)
+              if st in ("PREPARE_FOR_SUBMISSION", "READY_FOR_REVIEW"):
+                  decl = get(f"/appInfos/{info['id']}/ageRatingDeclaration")["data"]
+          if decl is None:
+              decl = {"id": version["id"], "attributes": {}}
+          print("age rating before:", decl["id"], json.dumps(decl["attributes"], sort_keys=True))
+          if decl["attributes"].get("socialMedia") is not None:
+              print("socialMedia already set")
               raise SystemExit(0)
           value = os.environ["AGE_RATING_SOCIAL_MEDIA"] == "true"
           r = requests.patch(
