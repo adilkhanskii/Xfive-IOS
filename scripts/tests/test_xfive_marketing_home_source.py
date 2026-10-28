@@ -278,9 +278,19 @@ class XFiveMarketingHomeSourceTests(unittest.TestCase):
         self.assertIn('accessibilityIdentifier("x5.home.hero.\\(slide.id)")', home)
         self.assertIn('assetName: "HomeCoverTargetAds"', home)
         self.assertIn('assetName: "HomeUtilityVideo"', home)
-        self.assertIn('assetName: "HomeTrendFruitVideo"', home)
         self.assertIn("action: .videoGeneration", home)
         self.assertIn("action: .liveFruits", home)
+
+    def test_live_products_slide_is_not_in_the_hero(self):
+        # 27.10 (Адильхан): «живые продукты уберем, не нужная тема» — только слайд на главной.
+        home = HOME.read_text(encoding="utf-8")
+        slides = home.split("private var heroSlides", 1)[1].split(
+            "private var imageGenerationCard", 1
+        )[0]
+
+        self.assertNotIn('"live_products"', slides)
+        self.assertNotIn("liveProductsHero", home)
+        self.assertNotIn('title: "Живые\\nпродукты"', home)
 
     def test_every_trend_autoplays_video_and_opens_a_real_route(self):
         home = HOME.read_text(encoding="utf-8")
