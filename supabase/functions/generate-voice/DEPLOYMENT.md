@@ -59,6 +59,10 @@ ElevenLabs API key permissions (dashboard → API keys → restrict scopes):
 
 Instant Voice Cloning requires a paid ElevenLabs plan (Starter or above). A key
 that answers 401/403 is treated as "скоро": nothing is charged.
+Clone is off until the server secret `ELEVENLABS_CLONE_ENABLED=true` is set
+(after buying Starter): catalog returns `clone_available: false` and `clone`
+answers 403 `clone_requires_plan` ("нужен тариф Starter") before any credit
+check or provider call. A provider 401/403 on clone maps to the same code.
 
 Prices (credits, server-side only): standard voice 30 / premium 150 per started
 1000 characters; clone 300 once; design 50 per set of 3 previews; saving a

@@ -21,6 +21,10 @@ Deno.serve(createVoiceStudioHandler({
   verifyUser: (req: Request) =>
     verifyAIStudioUser(req, { supabaseURL, anonKey }),
   voicesClient: () => voices,
+  // Клон голоса (IVC) у ElevenLabs только на платном тарифе Starter+.
+  // Пока тариф не куплен — секрет не ставим, клиент видит «нужен тариф Starter».
+  cloneEnabled: () =>
+    String(Deno.env.get("ELEVENLABS_CLONE_ENABLED") || "").trim() === "true",
   quote: (userID: string) =>
     backend.rpc("voice_studio_quote", { p_user_id: userID }),
   charge: (parameters: Record<string, unknown>) =>

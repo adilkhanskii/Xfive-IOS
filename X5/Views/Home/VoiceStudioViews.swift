@@ -141,6 +141,7 @@ struct PremiumVoicePickerView: View {
                     title: "Свой голос",
                     icon: "mic.fill",
                     price: catalog.prices.clone,
+                    blockedNote: catalog.cloneAvailable ? nil : "Нужен тариф Starter",
                     action: onClone
                 )
                 addCard(
@@ -243,8 +244,15 @@ struct PremiumVoicePickerView: View {
         }
     }
 
-    private func addCard(title: String, icon: String, price: Int, action: @escaping () -> Void) -> some View {
-        let disabled = !available || isFull
+    private func addCard(
+        title: String,
+        icon: String,
+        price: Int,
+        blockedNote: String? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
+        // blockedNote: действие выключено сервером (клон без тарифа Starter).
+        let disabled = !available || isFull || blockedNote != nil
         return Button(action: action) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 5) {
@@ -259,7 +267,7 @@ struct PremiumVoicePickerView: View {
                 if !available {
                     VoiceSoonBadge()
                 } else {
-                    Text(isFull ? "Лимит 3 голоса" : "\(price) кредитов")
+                    Text(blockedNote ?? (isFull ? "Лимит 3 голоса" : "\(price) кредитов"))
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.white.opacity(0.45))
                 }

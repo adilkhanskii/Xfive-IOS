@@ -57,9 +57,15 @@ struct VoiceStudioCatalog: Decodable, Equatable {
     let voiceLimit: Int
     let premade: [VoiceStudioPremadeVoice]
     let myVoices: [VoiceStudioMyVoice]
+    /// Клон голоса включён на сервере (нужен тариф Starter у провайдера).
+    /// Нет поля (старый сервер) — считаем, что включён.
+    var cloneAvailableFlag: Bool? = nil
+
+    var cloneAvailable: Bool { cloneAvailableFlag ?? true }
 
     enum CodingKeys: String, CodingKey {
         case premiumAvailable = "premium_available"
+        case cloneAvailableFlag = "clone_available"
         case prices
         case voiceLimit = "voice_limit"
         case premade
@@ -120,6 +126,8 @@ enum VoiceStudioError: LocalizedError, Equatable {
                 return "Опишите голос подробнее — от 20 символов."
             case "premium_unavailable":
                 return "Премиум-голоса скоро появятся. Ничего не списано."
+            case "clone_requires_plan":
+                return "Свой голос пока недоступен — нужен тариф Starter. Кредиты не списаны."
             case "provider_rejected":
                 return "Не удалось создать голос. Кредиты не списаны — попробуйте другую запись."
             default:

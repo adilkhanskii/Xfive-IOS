@@ -116,6 +116,7 @@ async function catalog(user, deps) {
   }
   return json({
     premium_available: premiumAvailable,
+    clone_available: premiumAvailable && cloneEnabled(deps),
     prices: VOICE_STUDIO_PRICES,
     voice_limit: VOICE_STUDIO_VOICE_LIMIT,
     premade: PREMIUM_VOICES.map((voice) => ({
@@ -132,6 +133,8 @@ async function catalog(user, deps) {
 async function clone(user, input, deps) {
   const client = deps.voicesClient();
   if (!client) return premiumUnavailable();
+  // До кредитов и до провайдера: без тарифа Starter ничего не списываем.
+  if (!cloneEnabled(deps)) return cloneRequiresPlan();
   const key = requestID(input.request_id);
   const name = voiceName(input.name);
   cloneConsent(input.consent);
@@ -140,7 +143,14 @@ async function clone(user, input, deps) {
   const blocked = await quoteBlock(user, VOICE_STUDIO_PRICES.clone, true, deps);
   if (blocked) return blocked;
 
-  const created = await client.clone({ name, audio: file, type });
+  let created;
+  try {
+    created = await client.clone({ name, audio: file, type });
+  } catch (error) {
+    // Тариф ElevenLabs не даёт клон (401/403) — это не «премиум скоро».
+    if (error?.keyRejected) return cloneRequiresPlan();
+    throw error;
+  }
   return await chargeOrRollback({
     user,
     key,
@@ -347,6 +357,20 @@ function voiceLimit() {
       voice_limit: VOICE_STUDIO_VOICE_LIMIT,
     }),
     409,
+  );
+}
+
+function cloneEnabled(deps) {
+  return typeof deps.cloneEnabled === "function" && deps.cloneEnabled() === true;
+}
+
+function cloneRequiresPlan() {
+  return json(
+    safeStudioError(
+      "clone_requires_plan",
+      "Own voice needs the Starter plan. Nothing was charged.",
+    ),
+    403,
   );
 }
 

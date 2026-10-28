@@ -48,6 +48,7 @@ function setup(overrides = {}) {
   const deps = {
     verifyUser: async () => ({ id: userID }),
     voicesClient: () => client,
+    cloneEnabled: () => true,
     quote: async () => ({
       status: "ok",
       credits: 1_000,
@@ -272,7 +273,23 @@ test("without ELEVENLABS_API_KEY every paid action is premium_unavailable", asyn
   }
 });
 
-test("a key without rights maps to premium_unavailable", async () => {
+test("clone on a plan without cloning: clone_requires_plan before credits and provider", async () => {
+  const { handler, calls } = setup({
+    deps: {
+      cloneEnabled: () => false,
+      quote: async () => ({ status: "ok", credits: 0, voice_count: 0, voice_limit: 3 }),
+    },
+  });
+  const response = await handler(cloneRequest());
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).error.code, "clone_requires_plan");
+  assert.deepEqual(calls, []);
+  const catalog = await (await handler(jsonRequest({ action: "catalog" }))).json();
+  assert.equal(catalog.premium_available, true);
+  assert.equal(catalog.clone_available, false);
+});
+
+test("clone rejected by the provider plan maps to clone_requires_plan, nothing charged", async () => {
   const rejected = Object.assign(new Error("elevenlabs_rejected"), {
     name: "ElevenLabsVoicesError",
     keyRejected: true,
@@ -285,8 +302,8 @@ test("a key without rights maps to premium_unavailable", async () => {
     },
   });
   const response = await handler(cloneRequest());
-  assert.equal(response.status, 503);
-  assert.equal((await response.json()).error.code, "premium_unavailable");
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).error.code, "clone_requires_plan");
   assert.equal(calls.filter(([name]) => name === "charge").length, 0);
 });
 

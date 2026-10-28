@@ -97,6 +97,11 @@ class IOSVoiceGenerationSourceTests(unittest.TestCase):
         self.assertIn("cloneMaxSeconds: TimeInterval = 90", studio)
         self.assertIn("cloneMaxBytes = 10 * 1024 * 1024", studio)
         self.assertIn("guard consent else", studio)
+        # Клон без тарифа Starter: сервер выключает, приложение говорит понятно.
+        self.assertIn('case cloneAvailableFlag = "clone_available"', studio)
+        self.assertIn('"clone_requires_plan"', studio)
+        self.assertIn("нужен тариф Starter", studio)
+        self.assertIn('catalog.cloneAvailable ? nil : "Нужен тариф Starter"', views)
         # ▶ образца только при ссылке от сервера, иначе «скоро».
         self.assertIn("if available, let url = voice.previewURL", views)
         # Теги эмоций eleven_v3 и ползунки премиума.

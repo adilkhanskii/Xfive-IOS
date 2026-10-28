@@ -824,7 +824,8 @@ struct VoiceGeneratorView: View {
                 prices: catalog.prices,
                 voiceLimit: catalog.voiceLimit,
                 premade: catalog.premade,
-                myVoices: catalog.myVoices + [voice]
+                myVoices: catalog.myVoices + [voice],
+                cloneAvailableFlag: catalog.cloneAvailableFlag
             )
         }
         premiumVoiceID = voice.id
@@ -851,7 +852,8 @@ struct VoiceGeneratorView: View {
                     prices: catalog.prices,
                     voiceLimit: catalog.voiceLimit,
                     premade: catalog.premade,
-                    myVoices: catalog.myVoices.filter { $0.id != voice.id }
+                    myVoices: catalog.myVoices.filter { $0.id != voice.id },
+                    cloneAvailableFlag: catalog.cloneAvailableFlag
                 )
                 if premiumVoiceID == voice.id {
                     premiumVoiceID = VoiceGenerationPremiumVoice.sarah.rawValue
