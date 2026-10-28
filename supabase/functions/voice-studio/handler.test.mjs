@@ -277,14 +277,20 @@ test("clone on a plan without cloning: clone_requires_plan before credits and pr
   const { handler, calls } = setup({
     deps: {
       cloneEnabled: () => false,
-      quote: async () => ({ status: "ok", credits: 0, voice_count: 0, voice_limit: 3 }),
+      quote: async () => ({
+        status: "ok",
+        credits: 0,
+        voice_count: 0,
+        voice_limit: 3,
+      }),
     },
   });
   const response = await handler(cloneRequest());
   assert.equal(response.status, 403);
   assert.equal((await response.json()).error.code, "clone_requires_plan");
   assert.deepEqual(calls, []);
-  const catalog = await (await handler(jsonRequest({ action: "catalog" }))).json();
+  const catalog = await (await handler(jsonRequest({ action: "catalog" })))
+    .json();
   assert.equal(catalog.premium_available, true);
   assert.equal(catalog.clone_available, false);
 });

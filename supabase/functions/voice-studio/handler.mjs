@@ -361,7 +361,8 @@ function voiceLimit() {
 }
 
 function cloneEnabled(deps) {
-  return typeof deps.cloneEnabled === "function" && deps.cloneEnabled() === true;
+  return typeof deps.cloneEnabled === "function" &&
+    deps.cloneEnabled() === true;
 }
 
 function cloneRequiresPlan() {
