@@ -30,6 +30,56 @@ jobs:
       - run: python -m pip install --require-hashes -r .github/requirements/asc-requirements.lock
       - name: Lock automatic release before review submission
         run: python scripts/asc_set_after_approval.py
+      # 28.10: Apple сделала обязательным ответ socialMedia в возрастном рейтинге
+      # (409 ENTITY_ERROR.ATTRIBUTE.REQUIRED на 1.1.18). Ставим только пустое поле:
+      # в X5 есть профили, подписки, лента портфолио и чаты — это соцфункции.
+      - name: Fill missing age rating answer (socialMedia)
+        env:
+          AGE_RATING_SOCIAL_MEDIA: "true"
+        run: |
+          python <<'PY'
+          import base64, json, os, time
+          import jwt, requests
+
+          BASE = "https://api.appstoreconnect.apple.com/v1"
+          token = jwt.encode(
+              {"iss": os.environ["ASC_API_ISSUER_ID"], "iat": int(time.time()),
+               "exp": int(time.time()) + 600, "aud": "appstoreconnect-v1"},
+              base64.b64decode(os.environ["ASC_API_KEY_BASE64"]),
+              algorithm="ES256",
+              headers={"kid": os.environ["ASC_API_KEY_ID"], "typ": "JWT"},
+          )
+          h = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+          def get(path):
+              r = requests.get(f"{BASE}{path}", headers=h, timeout=60)
+              if r.status_code != 200:
+                  print(path, r.status_code, r.text[:2000])
+                  raise SystemExit(1)
+              return r.json()
+
+          app = get(f"/apps?filter[bundleId]={os.environ['BUNDLE_ID']}")["data"][0]
+          versions = get(f"/apps/{app['id']}/appStoreVersions?filter[platform]=IOS&limit=50")["data"]
+          version = next(v for v in versions if v["attributes"]["versionString"] == os.environ["EXPECTED_VERSION"])
+          decl = get(f"/appStoreVersions/{version['id']}/ageRatingDeclaration")["data"]
+          print("age rating before:", json.dumps(decl["attributes"], sort_keys=True))
+          if decl["attributes"].get("socialMedia") is not None:
+              print("socialMedia already set")
+              raise SystemExit(0)
+          if version["attributes"]["appStoreState"] != "PREPARE_FOR_SUBMISSION":
+              print("version not editable, skip")
+              raise SystemExit(0)
+          value = os.environ["AGE_RATING_SOCIAL_MEDIA"] == "true"
+          r = requests.patch(
+              f"{BASE}/ageRatingDeclarations/{decl['id']}", headers=h, timeout=60,
+              json={"data": {"type": "ageRatingDeclarations", "id": decl["id"],
+                             "attributes": {"socialMedia": value}}},
+          )
+          print("PATCH socialMedia", value, "->", r.status_code)
+          if r.status_code != 200:
+              print(r.text[:2000])
+              raise SystemExit(1)
+          PY
       - name: Submit App Store version for review
         run: |
           python <<'PY'
