@@ -50,7 +50,7 @@ class ReleaseVersionSourceTests(unittest.TestCase):
             r'APP_VERSION\s*=\s*"([^"]+)"', fastfile
         ).group(1)
 
-        self.assertEqual(marketing_version, "1.1.17")
+        self.assertEqual(marketing_version, "1.1.18")
         # 09.10.2026: в App Store живая 1.1.10; ревью идёт как 1.1.15 сборка 251 из release/ios.
         # Сборка в TestFlight и цель ревью снова один и тот же номер.
         # 07.10.2026: тестовые TestFlight-сборки ушли вперёд (245 — фикс модуля
@@ -66,10 +66,11 @@ class ReleaseVersionSourceTests(unittest.TestCase):
         # 23.10: TestFlight 262 («Связаться с разработчиком» — сразу чат, понятная почта);
         # на проверке Apple остаётся 261 (очередь не теряем), поэтому ниже цель ревью — 261.
         # 26.10: 1.1.16 (263) в продаже → 1.1.17 (265); сборка и цель ревью — одно число.
-        self.assertEqual(runtime_build_number, "265")
+        # 28.10: 1.1.17 (265) в продаже → 1.1.18 (266): премиум-озвучка + главная.
+        self.assertEqual(runtime_build_number, "266")
         self.assertEqual(fastlane_version, marketing_version)
         self.assertIn(
-            f"Version {marketing_version} build 265",
+            f"Version {marketing_version} build 266",
             review_notes,
         )
         self.assertIn(
@@ -77,7 +78,7 @@ class ReleaseVersionSourceTests(unittest.TestCase):
             submit_workflow,
         )
         self.assertIn(
-            'EXPECTED_BUILD: "265"',
+            'EXPECTED_BUILD: "266"',
             submit_workflow,
         )
         self.assertIn(
@@ -85,7 +86,7 @@ class ReleaseVersionSourceTests(unittest.TestCase):
             prepare_workflow,
         )
         self.assertIn(
-            'BUILD_NUMBER: "265"',
+            'BUILD_NUMBER: "266"',
             prepare_workflow,
         )
 

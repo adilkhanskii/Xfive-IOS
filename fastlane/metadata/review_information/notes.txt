@@ -1,9 +1,12 @@
-Xfive marketing. Version 1.1.17 build 265.
+Xfive marketing. Version 1.1.18 build 266.
 This update keeps the reviewed 1.1.10 payment safeguards: the selected StoreKit
 product is validated before any purchase success is reported and credit
-confirmation messages stay explicit. This build only changes the home screen
-layout (order of feature cards and new cover images) and shows generation
-progress as a percentage on the generation card;
+confirmation messages stay explicit. This build adds a premium tier to AI
+voiceover (Home -> Voice): lifelike voices with previews, "Voice by
+description" and "Own voice" (cloning requires recording or uploading your own
+voice and an explicit consent checkbox; it is currently switched off on the
+server). Premium is priced in credits by the server. The home screen no longer
+shows the "Live products" slide;
 prices and charging are unchanged. No Kaspi or external checkout is added; all paid content is
 unlocked only with credits bought through In-App Purchase.
 
@@ -20,4 +23,5 @@ Production purchases require Apple's signed transaction verification.
 
 Mainland China remains excluded from availability. Existing privacy disclosures,
 AI capabilities, account deletion and portfolio moderation are unchanged.
-Portfolio moderation uses OpenAI as disclosed in the privacy policy.
+Portfolio moderation uses OpenAI and voiceover uses MiniMax and ElevenLabs, as
+disclosed in the privacy policy.

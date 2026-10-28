@@ -16,8 +16,8 @@ SPEC.loader.exec_module(MODULE)
 
 class CreditPackSubmissionTests(unittest.TestCase):
     def test_release_is_locked_to_build_265(self):
-        self.assertEqual(MODULE.TARGET_VERSION, "1.1.17")
-        self.assertEqual(MODULE.TARGET_BUILD, "265")
+        self.assertEqual(MODULE.TARGET_VERSION, "1.1.18")
+        self.assertEqual(MODULE.TARGET_BUILD, "266")
 
     def test_iap_version_payload_targets_parent_purchase(self):
         payload = MODULE.iap_version_payload("iap-1")
@@ -655,8 +655,8 @@ class CreditPackSubmissionTests(unittest.TestCase):
             / "asc-release-replace-submit.yml"
         ).read_text(encoding="utf-8")
 
-        self.assertIn('EXPECTED_VERSION: "1.1.17"', workflow)
-        self.assertIn('EXPECTED_BUILD: "265"', workflow)
+        self.assertIn('EXPECTED_VERSION: "1.1.18"', workflow)
+        self.assertIn('EXPECTED_BUILD: "266"', workflow)
         self.assertIn(
             "python scripts/asc_submit_credit_packs.py --action submit",
             workflow,
