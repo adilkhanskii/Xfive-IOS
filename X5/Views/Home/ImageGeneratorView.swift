@@ -20,6 +20,7 @@ struct ImageGeneratorView: View {
     @State private var selectedQuantity = 1
     @State private var selectedSize: ImageGenerationSize = .square
     @State private var showingGallery = false
+    @State private var showingStore = false
     // Все фото на этом экране — через галерею SystemPhotoPicker на корне экрана:
     // SwiftUI-шная закрывалась и открывалась заново после Face ID (Адильхан 10.10;
     // 18:05 — «Примеры обложек тоже тупняк»).
@@ -133,6 +134,12 @@ struct ImageGeneratorView: View {
         }
         .sheet(isPresented: $showingGallery) {
             GeneratedGalleryView()
+        }
+        // Адильхан 30.10: не хватает кредитов → магазин; после покупки обновляем баланс
+        .sheet(isPresented: $showingStore, onDismiss: {
+            Task { await refreshProfileIfPossible() }
+        }) {
+            PaywallView()
         }
         .x5PhotoPicker(isPresented: $showingReferencePicker, limit: referencePickLimit) { providers in
             let maxCount = referenceMaxCount
@@ -807,13 +814,17 @@ struct ImageGeneratorView: View {
     private var generateButton: some View {
         Button {
             X5Feedback.impact(.medium)
-            Task { await generate() }
+            if needsTopUp {
+                showingStore = true
+            } else {
+                Task { await generate() }
+            }
         } label: {
             HStack(spacing: 8) {
                 if isGenerating {
                     ProgressView().tint(.black)
                 } else {
-                    Image(systemName: "wand.and.stars")
+                    Image(systemName: needsTopUp ? "plus.circle.fill" : "wand.and.stars")
                 }
                 Text(generateButtonTitle)
                     .lineLimit(1)
@@ -823,11 +834,17 @@ struct ImageGeneratorView: View {
             .foregroundColor(.black)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 15)
-            .background(canGenerate ? Color.white.opacity(0.92) : Color.gray.opacity(0.35))
+            .background((canGenerate || needsTopUp) ? Color.white.opacity(0.92) : Color.gray.opacity(0.35))
             .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
         }
         .buttonStyle(.plain)
-        .disabled(!canGenerate || isGenerating)
+        .disabled(!(canGenerate || needsTopUp) || isGenerating)
+    }
+
+    /// Баланс загружен, но кредитов меньше цены — кнопка ведёт в магазин, а не серая.
+    private var needsTopUp: Bool {
+        !isGenerating && currentCredits != nil && !hasEnoughCredits
+            && !(studioCapabilities != nil && !imageCapability.available)
     }
 
     @ViewBuilder
@@ -914,7 +931,7 @@ struct ImageGeneratorView: View {
         if isGenerating { return loc.t("gen_generating") }
         if studioCapabilities != nil && !imageCapability.available { return "Сервис временно недоступен" }
         if currentCredits == nil { return loc.t("gen_loading_balance") }
-        if !hasEnoughCredits { return "\(loc.t("gen_need")) \(totalCreditCost) \(loc.t("gen_credits"))" }
+        if !hasEnoughCredits { return loc.t("gen_top_up") }
         if !hasValidPromptOrReferences { return loc.t("gen_prompt_required") }
         // Адильхан 18.10: цена прямо на кнопке («Сгенерировать за 60 кредитов»), как было раньше
         return String(format: loc.t("gen_generate_for"), totalCreditCost)

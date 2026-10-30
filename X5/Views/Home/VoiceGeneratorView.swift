@@ -56,6 +56,7 @@ struct VoiceGeneratorView: View {
     @State private var selectedLanguage = VoiceGenerationLanguage.automatic
     @State private var speed = 1.0
     @State private var isGenerating = false
+    @State private var showingStore = false
     @State private var result: VoiceGenerationResult?
     @State private var errorMessage: String?
     @State private var player: AVPlayer?
@@ -123,6 +124,12 @@ struct VoiceGeneratorView: View {
             }
             .task {
                 await loadPremiumAvailability()
+            }
+            // Адильхан 30.10: не хватает кредитов → магазин; после покупки обновляем баланс
+            .sheet(isPresented: $showingStore, onDismiss: {
+                Task { await refreshProfile() }
+            }) {
+                PaywallView()
             }
             .sheet(item: $studioSheet) { sheet in
                 switch sheet {
@@ -495,7 +502,11 @@ struct VoiceGeneratorView: View {
 
     private var generateButton: some View {
         Button {
-            generate()
+            if needsTopUp {
+                showingStore = true
+            } else {
+                generate()
+            }
         } label: {
             HStack(spacing: 10) {
                 if isGenerating {
@@ -513,7 +524,7 @@ struct VoiceGeneratorView: View {
             .frame(height: 56)
             .background(
                 LinearGradient(
-                    colors: canGenerate
+                    colors: (canGenerate || needsTopUp)
                         ? [actionBlue, actionCyan]
                         : [Color.white.opacity(0.14), Color.white.opacity(0.08)],
                     startPoint: .leading,
@@ -523,7 +534,15 @@ struct VoiceGeneratorView: View {
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
-        .disabled(!canGenerate)
+        .disabled(!(canGenerate || needsTopUp))
+    }
+
+    /// Текст введён, баланс загружен, но кредитов мало — кнопка «Пополнить баланс» ведёт в магазин.
+    private var needsTopUp: Bool {
+        !isGenerating && auth.userId != nil && currentCredits != nil &&
+        (1...VoiceGenerationService.maxCharacters).contains(characterCount) &&
+        creditCost > 0 && !hasEnoughCredits &&
+        (selectedTier == .standard || premiumAvailable)
     }
 
     private func resultCard(_ result: VoiceGenerationResult) -> some View {
@@ -689,7 +708,7 @@ struct VoiceGeneratorView: View {
         if characterCount > VoiceGenerationService.maxCharacters {
             return "Сократите текст"
         }
-        if !hasEnoughCredits { return "Недостаточно кредитов" }
+        if !hasEnoughCredits { return "Пополнить баланс" }
         return "Создать за \(creditCost) кредитов"
     }
 
