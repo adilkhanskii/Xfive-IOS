@@ -65,11 +65,33 @@ struct HubTask: Codable, Identifiable, Hashable {
     let publicVisibleAt: String?
     let acceptedSpecialistId: String?
     let acceptedSpecialistName: String?
+    // Массивы с миграции 20261030180000. Optional: база без миграции их не
+    // отдаёт — тогда берём одиночные поля (см. countryCodes / cities / categories).
+    var countryCodesRaw: [String]? = nil
+    var citiesRaw: [String]? = nil
+    var categoriesRaw: [String]? = nil
+
+    /// Пусто = «Все страны».
+    var countryCodes: [String] { Self.items(countryCodesRaw, fallback: countryCode) }
+    /// Пусто = «Все города».
+    var cities: [String] { Self.items(citiesRaw, fallback: city) }
+    /// Минимум одна у новых заданий; пусто только у старых без категории.
+    var categories: [String] { Self.items(categoriesRaw, fallback: category) }
+
+    private static func items(_ raw: [String]?, fallback: String?) -> [String] {
+        let source = raw ?? [fallback].compactMap { $0 }
+        return source
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
 
     enum CodingKeys: String, CodingKey {
         case id, title, description, budget, category, deadline, status
         case countryCode = "country_code"
         case city
+        case countryCodesRaw = "country_codes"
+        case citiesRaw = "cities"
+        case categoriesRaw = "categories"
         case authorId = "author_id"
         case authorName = "author_name"
         case authorAvatar = "author_avatar"
@@ -78,6 +100,21 @@ struct HubTask: Codable, Identifiable, Hashable {
         case publicVisibleAt = "public_visible_at"
         case acceptedSpecialistId = "accepted_specialist_id"
         case acceptedSpecialistName = "accepted_specialist_name"
+    }
+}
+
+extension HubTask {
+    /// «Алматы, Астана · Казахстан» / «Все города · Казахстан +2» / «Все страны».
+    /// compact — для карточек (первый +N), иначе полный список (детали задания).
+    func locationLabel(allCountries: String, allCities: String, compact: Bool) -> String {
+        let countryNames = CISLocations.countryNames(countryCodes)
+        func join(_ names: [String], _ allLabel: String) -> String {
+            if names.isEmpty { return allLabel }
+            return compact ? CISLocations.compactLabel(names, allLabel: allLabel) : names.joined(separator: ", ")
+        }
+        let countries = join(countryNames, allCountries)
+        guard !countryCodes.isEmpty else { return countries }
+        return join(cities, allCities) + " · " + countries
     }
 }
 
@@ -258,6 +295,12 @@ enum HubCategories {
         case .kk: return category.labelKk
         case .en: return category.labelEn
         }
+    }
+
+    /// «Таргет, SMM» — все категории задания через запятую.
+    static func label(for ids: [String], language: AppLanguage) -> String {
+        guard !ids.isEmpty else { return label(for: nil, language: language) }
+        return ids.map { label(for: $0, language: language) }.joined(separator: ", ")
     }
 
     /// Значок категории. Если такого SF Symbol на этой iOS нет — общий значок,
@@ -462,9 +505,9 @@ final class HubService: ObservableObject {
         title: String,
         description: String,
         budget: String,
-        category: String,
-        countryCode: String,
-        city: String,
+        categories: [String],
+        countryCodes: [String],
+        cities: [String],
         deadline: Date?,
         accessToken: String
     ) async -> HubTask? {
@@ -472,11 +515,9 @@ final class HubService: ObservableObject {
             "title": title,
             "description": description,
             "budget": budget,
-            "category": category,
-            "country_code": countryCode,
-            "city": city,
             "deadline": NSNull()
         ]
+        body.merge(Self.locationCategoryFields(categories: categories, countryCodes: countryCodes, cities: cities)) { _, new in new }
         if let deadline {
             body["deadline"] = Self.iso8601String(from: deadline)
         }
@@ -540,9 +581,22 @@ final class HubService: ObservableObject {
 
     // MARK: - Writes
 
+    /// Массивы + одиночные поля (= первый элемент, NULL для «все»): старые
+    /// 1.1.18/1.1.19 читают только одиночные. Триггер базы делает то же самое.
+    static func locationCategoryFields(categories: [String], countryCodes: [String], cities: [String]) -> [String: Any] {
+        [
+            "categories": categories,
+            "category": categories.first ?? "other",
+            "country_codes": countryCodes,
+            "country_code": countryCodes.first.map { $0 as Any } ?? NSNull(),
+            "cities": cities,
+            "city": cities.first.map { $0 as Any } ?? NSNull()
+        ]
+    }
+
     /// Inserts a new task. Returns the new task on success.
     @discardableResult
-    func createTask(authorId: String, authorName: String?, authorAvatar: String?, companyName: String?, title: String, description: String, budget: String, category: String, countryCode: String, city: String, deadline: Date?, accessToken: String) async -> HubTask? {
+    func createTask(authorId: String, authorName: String?, authorAvatar: String?, companyName: String?, title: String, description: String, budget: String, categories: [String], countryCodes: [String], cities: [String], deadline: Date?, accessToken: String) async -> HubTask? {
         var request = URLRequest(url: baseURL.appendingPathComponent("rest/v1/tasks"))
         request.httpMethod = "POST"
         request.setValue(anonKey, forHTTPHeaderField: "apikey")
@@ -555,12 +609,10 @@ final class HubService: ObservableObject {
             "title": title,
             "description": description,
             "budget": budget,
-            "category": category,
-            "country_code": countryCode,
-            "city": city,
             "status": "open",
             "public_visible_at": Self.iso8601String(from: Date())
         ]
+        body.merge(Self.locationCategoryFields(categories: categories, countryCodes: countryCodes, cities: cities)) { _, new in new }
         if let n = authorName { body["author_name"] = n }
         if let a = authorAvatar { body["author_avatar"] = a }
         if let c = companyName, !c.isEmpty { body["company_name"] = c }

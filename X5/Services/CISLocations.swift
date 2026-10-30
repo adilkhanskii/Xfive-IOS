@@ -85,6 +85,28 @@ enum CISLocations {
         cities.filter { $0.country == country && $0.regionCode == regionCode }
     }
 
+    /// Подпись выбора: «Все страны» / «Казахстан, Россия» / «Казахстан +2».
+    static func compactLabel(_ names: [String], allLabel: String) -> String {
+        switch names.count {
+        case 0: return allLabel
+        case 1, 2: return names.joined(separator: ", ")
+        default: return "\(names[0]) +\(names.count - 1)"
+        }
+    }
+
+    static func countryNames(_ codes: [String]) -> [String] {
+        codes.map { countryName(for: $0) ?? $0 }
+    }
+
+    /// После смены стран оставляем только города этих стран; «Все страны» → «Все города».
+    static func keptCities(_ names: [String], in countryCodes: [String]) -> [String] {
+        guard !countryCodes.isEmpty else { return [] }
+        let allowed = Set(countryCodes)
+        return names.filter { name in
+            cities.contains { allowed.contains($0.country) && $0.city == name }
+        }
+    }
+
     static func localizedRegionName(country: String, code: String, fallback: String) -> String {
         guard country == "KZ" else { return fallback }
         return kazakhstanRegionNames[code] ?? fallback

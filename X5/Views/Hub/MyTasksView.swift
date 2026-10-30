@@ -128,14 +128,25 @@ struct MyTasksView: View {
                         .font(.system(size: 17, weight: .bold))
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    if let category = task.category, !category.isEmpty {
+                    if let category = task.categories.first {
                         Label(
-                            HubCategories.label(for: category, language: loc.current),
+                            HubCategories.label(for: task.categories, language: loc.current),
                             systemImage: HubCategories.symbol(for: category)
                         )
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(.white.opacity(0.55))
                     }
+                    Label(
+                        task.locationLabel(
+                            allCountries: loc.t("hub_all_countries"),
+                            allCities: loc.t("location_all_cities"),
+                            compact: true
+                        ),
+                        systemImage: "mappin.and.ellipse"
+                    )
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.55))
+                    .lineLimit(1)
                 }
                 statusChip(task.status)
             }
@@ -335,9 +346,9 @@ private struct EditTaskView: View {
     @State private var title: String
     @State private var description: String
     @State private var budget: String
-    @State private var category: String
-    @State private var countryCode: String
-    @State private var city: String
+    @State private var categories: [String]
+    @State private var countryCodes: [String]
+    @State private var cities: [String]
     @State private var deadline: Date
     @State private var hasDeadline: Bool
     @State private var saving = false
@@ -350,9 +361,11 @@ private struct EditTaskView: View {
         _title = State(initialValue: task.title)
         _description = State(initialValue: task.description ?? "")
         _budget = State(initialValue: task.budget ?? "")
-        _category = State(initialValue: task.category ?? "other")
-        _countryCode = State(initialValue: task.countryCode ?? "KZ")
-        _city = State(initialValue: task.city ?? "")
+        // Старые значения категорий приводим к id списка, иначе галочка не встанет.
+        let categoryIds = HubCategories.orderedIDs(from: Array(HubCategories.normalizedIDs(from: task.categories)))
+        _categories = State(initialValue: categoryIds.isEmpty ? ["other"] : categoryIds)
+        _countryCodes = State(initialValue: task.countryCodes)
+        _cities = State(initialValue: task.cities)
         _deadline = State(initialValue: parsedDeadline ?? Date())
         _hasDeadline = State(initialValue: parsedDeadline != nil)
     }
@@ -375,15 +388,7 @@ private struct EditTaskView: View {
                     footer: Text(loc.t("task_budget_optional_footer"))
                 ) {
                     TextField(loc.t("task_budget_placeholder"), text: $budget)
-                    Picker(loc.t("my_tasks_category"), selection: $category) {
-                        ForEach(HubCategories.all) { item in
-                            Label(
-                                HubCategories.label(for: item.id, language: loc.current),
-                                systemImage: HubCategories.symbol(for: item.id)
-                            )
-                            .tag(item.id)
-                        }
-                    }
+                    TaskCategoriesPickerButton(categories: $categories)
                     Toggle(loc.t("my_tasks_deadline"), isOn: $hasDeadline)
                     if hasDeadline {
                         DatePicker(
@@ -395,12 +400,8 @@ private struct EditTaskView: View {
                 }
 
                 Section(header: Text(loc.t("task_location_section"))) {
-                    Picker(loc.t("onb_country"), selection: $countryCode) {
-                        ForEach(CISLocations.countries, id: \.code) { country in
-                            Text(country.name).tag(country.code)
-                        }
-                    }
-                    CISCityPickerButton(city: $city, countryCode: countryCode)
+                    TaskCountriesPickerButton(countryCodes: $countryCodes)
+                    CISMultiCityPickerButton(cities: $cities, countryCodes: countryCodes)
                 }
 
                 if let errorMessage {
@@ -433,13 +434,14 @@ private struct EditTaskView: View {
             }
         }
         .preferredColorScheme(.dark)
-        .onChange(of: countryCode) { _ in city = "" }
+        .onChange(of: countryCodes) { newCountries in
+            cities = CISLocations.keptCities(cities, in: newCountries)
+        }
     }
 
     private var canSave: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        !countryCode.isEmpty &&
-        city.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2
+        !categories.isEmpty
     }
 
     private func save() async {
@@ -460,9 +462,9 @@ private struct EditTaskView: View {
             title: title.trimmingCharacters(in: .whitespacesAndNewlines),
             description: description.trimmingCharacters(in: .whitespacesAndNewlines),
             budget: cleanBudget.isEmpty ? loc.t("task_budget_discussed") : cleanBudget,
-            category: category,
-            countryCode: countryCode,
-            city: city.trimmingCharacters(in: .whitespacesAndNewlines),
+            categories: categories,
+            countryCodes: countryCodes,
+            cities: cities,
             deadline: hasDeadline ? deadline : nil,
             accessToken: token
         )
