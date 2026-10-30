@@ -1,11 +1,11 @@
-Xfive marketing. Version 1.1.18 build 266.
+Xfive marketing. Version 1.1.19 build 267.
 This update keeps the reviewed 1.1.10 payment safeguards: the selected StoreKit
 product is validated before any purchase success is reported and credit
 confirmation messages stay explicit. This build adds a premium tier to AI
 voiceover (Home -> Voice): lifelike voices with previews, "Voice by
 description" and "Own voice" (cloning requires recording or uploading your own
-voice and an explicit consent checkbox; it is currently switched off on the
-server). Premium is priced in credits by the server. The home screen no longer
+voice and an explicit consent checkbox). In 1.1.19 a voice picked in "Voice by
+description" is saved to "My voices" and stays selected. Premium is priced in credits by the server. The home screen no longer
 shows the "Live products" slide;
 prices and charging are unchanged. No Kaspi or external checkout is added; all paid content is
 unlocked only with credits bought through In-App Purchase.

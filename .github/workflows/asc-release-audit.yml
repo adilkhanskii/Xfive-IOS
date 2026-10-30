@@ -40,9 +40,9 @@ jobs:
       ASC_API_KEY_BASE64: ${{ secrets.ASC_API_KEY_BASE64 }}
       BUNDLE_ID: com.x5studio.app
       EXPECTED_APP_NAME: "Xfive marketing"
-      EXPECTED_VERSION: "1.1.18"
-      EXPECTED_BUILD: "266"
-      EXPECTED_RUNTIME_BUILD: "266"
+      EXPECTED_VERSION: "1.1.19"
+      EXPECTED_BUILD: "267"
+      EXPECTED_RUNTIME_BUILD: "267"
       AUDIT_SCOPE: "post-submit-app-version-build-screenshots-subscriptions"
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2

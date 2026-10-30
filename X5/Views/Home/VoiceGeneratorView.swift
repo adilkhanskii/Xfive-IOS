@@ -43,7 +43,8 @@ struct VoiceGeneratorView: View {
     @State private var selectedVoice = VoiceGenerationVoice.brightHeroine
     @State private var selectedTier = VoiceGenerationTier.standard
     /// Премиум-голос: стандартный ElevenLabs или свой (клон / по описанию).
-    @State private var premiumVoiceID = VoiceGenerationPremiumVoice.sarah.rawValue
+    // Выбранный премиум-голос (в т.ч. свой) помним между заходами.
+    @AppStorage("x5.voice.premiumVoiceID") private var premiumVoiceID = VoiceGenerationPremiumVoice.sarah.rawValue
     @State private var premiumSettings = PremiumVoiceSettings.defaults
     /// Каталог «Мои голоса» с сервера; до ответа — карточки без ▶ и «скоро».
     @State private var catalog = VoiceStudioCatalog.offline
@@ -811,6 +812,11 @@ struct VoiceGeneratorView: View {
         let loadedCatalog = try? await voiceStudio.catalog(accessToken: token)
         if let loadedCatalog {
             catalog = loadedCatalog
+            // Запомненного голоса уже нет (удалён) — к стандартному.
+            let known = loadedCatalog.premade.contains { $0.id == premiumVoiceID }
+                || loadedCatalog.myVoices.contains { $0.id == premiumVoiceID }
+                || VoiceGenerationPremiumVoice(rawValue: premiumVoiceID) != nil
+            if !known { premiumVoiceID = VoiceGenerationPremiumVoice.sarah.rawValue }
         }
         // Премиум — только если и флаг, и сам ключ у провайдера принят.
         premiumAvailable = (capabilities?.tool("voice_premium").available ?? false)
@@ -829,6 +835,7 @@ struct VoiceGeneratorView: View {
             )
         }
         premiumVoiceID = voice.id
+        selectedTier = .premium
         if let creditsRemaining {
             applyStudioCredits(creditsRemaining)
         }
