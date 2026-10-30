@@ -889,9 +889,9 @@ struct VoiceDesignSheet: View {
                         }
                         studioField("Название голоса", text: $name)
                         StudioPrimaryButton(
-                            title: "Сохранить бесплатно",
+                            title: "Выбрать этот голос",
                             icon: "checkmark",
-                            enabled: selectedID != nil && !name.trimmingCharacters(in: .whitespaces).isEmpty,
+                            enabled: selectedID != nil && !isBusy,
                             busy: isBusy && !previews.isEmpty,
                             action: save
                         )
@@ -907,13 +907,32 @@ struct VoiceDesignSheet: View {
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Закрыть") { dismiss() }
-                        .foregroundStyle(studioAccent)
+                    // Закрыл с выбранным вариантом — сохраняем его (бесплатно), иначе
+                    // оплаченные превью пропадали и голос не попадал в «Мои голоса» (баг 30.10).
+                    Button(hasUnsavedChoice ? "Готово" : "Закрыть") {
+                        if hasUnsavedChoice { save() } else { dismiss() }
+                    }
+                    .foregroundStyle(studioAccent)
+                    .disabled(isBusy)
                 }
             }
             .onDisappear { player.stop() }
         }
+        // Свайп вниз не должен терять оплаченные варианты: закрытие — только кнопкой.
+        .interactiveDismissDisabled(hasUnsavedChoice || isBusy)
         .preferredColorScheme(.dark)
+    }
+
+    private var hasUnsavedChoice: Bool { selectedID != nil && !previews.isEmpty }
+
+    /// Пустое название — начало описания (лимит сервера 40 символов).
+    private var resolvedName: String {
+        let typed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !typed.isEmpty { return typed }
+        let text = descriptionText
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+        return text.count <= 40 ? text : String(text.prefix(39)).trimmingCharacters(in: .whitespaces) + "…"
     }
 
     private func previewRow(index: Int, preview: VoiceStudioDesignPreview) -> some View {
@@ -973,7 +992,7 @@ struct VoiceDesignSheet: View {
     }
 
     private func save() {
-        guard let selectedID else { return }
+        guard let selectedID, !isBusy else { return }
         isBusy = true
         errorMessage = nil
         Task { @MainActor in
@@ -985,7 +1004,7 @@ struct VoiceDesignSheet: View {
             do {
                 let voice = try await service.saveDesign(
                     generatedVoiceID: selectedID,
-                    name: name,
+                    name: resolvedName,
                     description: descriptionText,
                     accessToken: token
                 )
