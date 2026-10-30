@@ -25,6 +25,8 @@ struct ProfileView: View {
     @State private var savingShowInHub = false
     @State private var selectedSection: ProfileSection = .overview
     @State private var followCounts: ProfileFollowCounts?
+    /// «Бонус новым: выдано N из 1000» — только владельцу (Roles.isDeveloper).
+    @State private var signupBonusStats: SignupBonusStats?
     /// Счётчики обновляем только после настоящего фона, не после «неактивно»:
     /// галерея и Face ID на секунду делают приложение неактивным, и перерисовка
     /// профиля перезапускала галерею при выборе обложки (Адильхан 10.10).
@@ -113,6 +115,7 @@ struct ProfileView: View {
             .onAppear { showInHubToggle = currentUser.profile?.showInHub ?? false }
             .task(id: currentUser.profile?.id) {
                 await refreshFollowCounts()
+                await refreshSignupBonusStats()
             }
             // Cross-device follow changes do not emit this process's local
             // notification. Refresh whenever the app returns to the foreground;
@@ -275,6 +278,18 @@ struct ProfileView: View {
         VStack(spacing: 16) {
             storeCard
             myTasksCard
+            if let stats = signupBonusStats {
+                Text(
+                    loc.t("signup_bonus_stats")
+                        .replacingOccurrences(of: "{n}", with: "\(stats.granted)")
+                        .replacingOccurrences(of: "{max}", with: "\(stats.maxGrants)")
+                )
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.white.opacity(0.72))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+                .x5ClearGlass(cornerRadius: 16, highlight: 0.12)
+            }
             if let bio = currentUser.profile?.bio, !bio.isEmpty {
                 BioCard(text: bio)
             }
@@ -514,6 +529,17 @@ struct ProfileView: View {
     }
 
     // MARK: - Credit store
+
+    /// Ошибка, нет функции или не владелец → строку не показываем.
+    private func refreshSignupBonusStats() async {
+        guard Roles.isDeveloper(email: auth.userEmail, userId: auth.userId),
+              let token = await auth.freshAccessToken()
+        else {
+            signupBonusStats = nil
+            return
+        }
+        signupBonusStats = await SignupBonusService.stats(accessToken: token)
+    }
 
     private var myTasksCard: some View {
         NavigationLink {
