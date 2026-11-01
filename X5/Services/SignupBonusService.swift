@@ -8,14 +8,67 @@ struct SignupBonusClaim: Decodable {
     let balance: Int?
 }
 
-/// Ответ RPC signup_bonus_stats — только для разработчика (иначе 42501).
-struct SignupBonusStats: Decodable {
+/// Ответ RPC signup_bonus_stats / signup_bonus_update_settings — только для разработчика (иначе 42501).
+struct SignupBonusStats: Decodable, Equatable {
     let granted: Int
     let maxGrants: Int
+    let credits: Int
+    let enabled: Bool
 
     enum CodingKeys: String, CodingKey {
         case granted
         case maxGrants = "max_grants"
+        case credits
+        case enabled
+    }
+
+    init(granted: Int, maxGrants: Int, credits: Int, enabled: Bool) {
+        self.granted = granted
+        self.maxGrants = maxGrants
+        self.credits = credits
+        self.enabled = enabled
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        granted = try c.decode(Int.self, forKey: .granted)
+        maxGrants = try c.decode(Int.self, forKey: .maxGrants)
+        // Поля добавлены позже — если их нет, показываем как «включён, 200»
+        credits = try c.decodeIfPresent(Int.self, forKey: .credits) ?? 200
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+    }
+}
+
+/// Управление бонусом новым (владелец, Адильхан 01.11). Границы — как в
+/// signup_bonus_update_settings (миграция 20261101120000); сервер проверяет сам,
+/// здесь — чтобы ошибка была видна до запроса.
+enum SignupBonusSettingsError: String, Error, Equatable {
+    case credits, limit, access, save
+
+    var localizationKey: String { "bonus_ctl_err_\(rawValue)" }
+
+    static let maxCredits = 10_000
+    static let maxLimit = 1_000_000
+
+    static func validate(credits: Int?, maxGrants: Int?, granted: Int) -> SignupBonusSettingsError? {
+        guard let credits, (1...maxCredits).contains(credits) else { return .credits }
+        guard let maxGrants, maxGrants >= granted, maxGrants <= maxLimit else { return .limit }
+        return nil
+    }
+
+    /// Ошибка PostgREST (code / message) → понятный текст.
+    static func from(code: String?, message: String?) -> SignupBonusSettingsError {
+        let message = message ?? ""
+        if code == "42501" || message.contains("developer_required") { return .access }
+        if message.contains("invalid_credits") { return .credits }
+        if message.contains("max_grants") { return .limit }
+        return .save
+    }
+
+    /// Поле ввода: только цифры; пусто → nil.
+    static func number(from text: String) -> Int? {
+        let digits = text.filter(\.isNumber)
+        return digits.isEmpty ? nil : Int(digits.prefix(7))
     }
 }
 
@@ -65,6 +118,32 @@ enum SignupBonusService {
             return nil
         }
         return try? JSONDecoder().decode(SignupBonusStats.self, from: data)
+    }
+
+    /// Пауза / возобновление / подарок / лимит. Права проверяет сервер (is_x5_developer).
+    static func updateSettings(
+        enabled: Bool,
+        credits: Int,
+        maxGrants: Int,
+        accessToken: String,
+        session: URLSession = .shared
+    ) async -> Result<SignupBonusStats, SignupBonusSettingsError> {
+        var request = URLRequest(url: X5Config.supabaseBaseURL.appendingPathComponent("rest/v1/rpc/signup_bonus_update_settings"))
+        request.httpMethod = "POST"
+        request.setValue(X5Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = ["p_enabled": enabled, "p_credits": credits, "p_max_grants": maxGrants]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        guard let (data, response) = try? await session.data(for: request),
+              let http = response as? HTTPURLResponse
+        else { return .failure(.save) }
+        guard (200..<300).contains(http.statusCode) else {
+            let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            return .failure(.from(code: json?["code"] as? String, message: json?["message"] as? String))
+        }
+        guard let stats = try? JSONDecoder().decode(SignupBonusStats.self, from: data) else { return .failure(.save) }
+        return .success(stats)
     }
 
     private static func rpc(
