@@ -12,6 +12,8 @@ begin;
 -- Кредиты, уже начисленные бонусом, остаются у людей (не списываем).
 drop function if exists public.claim_signup_bonus(text, text);
 drop function if exists public.signup_bonus_stats();
+-- управление из профиля (20261101120000, отдельный откат: 20261101_signup_bonus_controls_rollback.sql)
+drop function if exists public.signup_bonus_update_settings(boolean, integer, integer);
 -- Таблицы оставляем для учёта выдач; удалить при необходимости:
 -- drop table if exists public.signup_bonus_grants;
 -- drop table if exists public.signup_bonus_settings;

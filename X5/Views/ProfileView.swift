@@ -27,6 +27,8 @@ struct ProfileView: View {
     @State private var followCounts: ProfileFollowCounts?
     /// «Бонус новым: выдано N из 1000» — только владельцу (Roles.isDeveloper).
     @State private var signupBonusStats: SignupBonusStats?
+    /// Шторка управления бонусом (пауза / подарок / лимит), Адильхан 01.11.
+    @State private var showingSignupBonusSettings = false
     /// Счётчики обновляем только после настоящего фона, не после «неактивно»:
     /// галерея и Face ID на секунду делают приложение неактивным, и перерисовка
     /// профиля перезапускала галерею при выборе обложки (Адильхан 10.10).
@@ -94,6 +96,21 @@ struct ProfileView: View {
             .sheet(isPresented: $showingSettings) { SettingsView() }
             .sheet(isPresented: $showingStore) { PaywallView() }
             .sheet(isPresented: $showingVerified) { VerifiedBadgeView() }
+            .sheet(isPresented: $showingSignupBonusSettings) {
+                if let stats = signupBonusStats {
+                    SignupBonusSettingsSheet(
+                        stats: stats,
+                        save: { enabled, credits, maxGrants in
+                            guard let token = await auth.freshAccessToken() else { return .failure(.save) }
+                            return await SignupBonusService.updateSettings(
+                                enabled: enabled, credits: credits, maxGrants: maxGrants, accessToken: token
+                            )
+                        },
+                        onSaved: { signupBonusStats = $0 }
+                    )
+                    .environmentObject(loc)
+                }
+            }
             .sheet(isPresented: $showingEdit) { EditProfileView() }
             .alert("Фото не сохранилось", isPresented: Binding(
                 get: { avatarError != nil },
@@ -279,16 +296,7 @@ struct ProfileView: View {
             storeCard
             myTasksCard
             if let stats = signupBonusStats {
-                Text(
-                    loc.t("signup_bonus_stats")
-                        .replacingOccurrences(of: "{n}", with: "\(stats.granted)")
-                        .replacingOccurrences(of: "{max}", with: "\(stats.maxGrants)")
-                )
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.white.opacity(0.72))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14)
-                .x5ClearGlass(cornerRadius: 16, highlight: 0.12)
+                SignupBonusOwnerRow(stats: stats) { showingSignupBonusSettings = true }
             }
             if let bio = currentUser.profile?.bio, !bio.isEmpty {
                 BioCard(text: bio)
