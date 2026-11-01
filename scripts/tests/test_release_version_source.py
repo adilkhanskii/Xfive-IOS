@@ -69,7 +69,9 @@ class ReleaseVersionSourceTests(unittest.TestCase):
         # 28.10: 1.1.17 (265) в продаже → 1.1.18 (266): премиум-озвучка + главная.
         # 30.10: 1.1.18 (266) в продаже → 1.1.19 (267): голос по описанию сохраняется.
         # 01.11: 1.1.19 (267) в продаже → 1.1.20 (268): несколько стран/городов/категорий, бонус новым.
-        self.assertEqual(runtime_build_number, "268")
+        # 01.11: TestFlight 269 (поле ввода в чате: скругление 18, до 5 строк, кнопки снизу);
+        # на проверке Apple остаётся 268 (очередь не теряем), поэтому ниже цель ревью — 268.
+        self.assertEqual(runtime_build_number, "269")
         self.assertEqual(fastlane_version, marketing_version)
         self.assertIn(
             f"Version {marketing_version} build 268",

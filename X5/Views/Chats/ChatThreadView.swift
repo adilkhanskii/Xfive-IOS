@@ -509,8 +509,12 @@ struct ChatThreadView: View {
         }
     }
 
+    /// Высота поля в одну строку. Кнопки по краям той же высоты: при росте поля вверх
+    /// они остаются прижаты к нижней строке (как в WhatsApp).
+    private static let composerMinHeight: CGFloat = 40
+
     private var inputBar: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .bottom, spacing: 8) {
             Button {
                 showingMediaPicker = true
             } label: {
@@ -525,7 +529,7 @@ struct ChatThreadView: View {
                             .foregroundColor(.white.opacity(0.55))
                     }
                 }
-                .frame(width: 36, height: 36)
+                .frame(width: 36, height: Self.composerMinHeight)
             }
             .buttonStyle(.plain)
             .disabled(sending)
@@ -538,6 +542,7 @@ struct ChatThreadView: View {
             }
 
             sendOrVoiceButton
+                .frame(width: 36, height: Self.composerMinHeight)
         }
         .padding(12)
         .background(Color.black.opacity(0.72).ignoresSafeArea(edges: .bottom))
@@ -590,22 +595,28 @@ struct ChatThreadView: View {
     }
 
     private var textComposer: some View {
-        HStack(spacing: 8) {
+        // Было: Capsule() — при 2–3 строках поле становилось овалом, текст резался
+        // по краям, 3-я строка вылезала (Адильхан 01.11, TF 1.1.20 (268)).
+        // Теперь как WhatsApp: скругление 18, растёт вверх до 5 строк, дальше прокрутка
+        // внутри; смайл внутри поля справа, прижат к нижней строке.
+        HStack(alignment: .bottom, spacing: 8) {
             TextField(loc.t("chats_message_placeholder"), text: $draft, axis: .vertical)
                 .focused($inputFocused)
-                .lineLimit(1...4)
+                .lineLimit(1...5)
             Button {
                 showingStickers = true
             } label: {
                 Image(systemName: "face.smiling")
                     .font(.system(size: 21, weight: .semibold))
                     .foregroundColor(.white.opacity(0.55))
+                    .frame(height: 22)
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.vertical, 9)
+        .frame(minHeight: Self.composerMinHeight)
         .background(Color.white.opacity(0.08))
-        .clipShape(Capsule())
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     @ViewBuilder
