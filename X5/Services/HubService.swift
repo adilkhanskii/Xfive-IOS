@@ -297,6 +297,9 @@ enum HubCategories {
         }
     }
 
+    /// Не больше 3 категорий в задании (Адильхан 30.10); база проверяет то же (tasks_categories_valid).
+    static let maxPerTask = 3
+
     /// «Таргет, SMM» — все категории задания через запятую.
     static func label(for ids: [String], language: AppLanguage) -> String {
         guard !ids.isEmpty else { return label(for: nil, language: language) }

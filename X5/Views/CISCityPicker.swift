@@ -181,6 +181,8 @@ struct MultiSelectPickerButton: View {
     @Binding var selection: [String]
     let summary: String
     var allLabel: String? = nil
+    // Лимит выбора (категории — до 3, Адильхан 30.10); nil = без лимита.
+    var maxSelection: Int? = nil
 
     @State private var isPresented = false
 
@@ -192,7 +194,7 @@ struct MultiSelectPickerButton: View {
         }
         .buttonStyle(.plain)
         .sheet(isPresented: $isPresented) {
-            MultiSelectSheet(title: title, options: options, selection: $selection, allLabel: allLabel)
+            MultiSelectSheet(title: title, options: options, selection: $selection, allLabel: allLabel, maxSelection: maxSelection)
                 .environmentObject(loc)
         }
     }
@@ -250,11 +252,13 @@ private struct MultiSelectRow: View {
 }
 
 /// Выбор не закрывает лист: отметил сколько нужно → «Готово».
-private func toggleItem(_ id: String, in selection: inout [String], keepAtLeastOne: Bool) {
+private func toggleItem(_ id: String, in selection: inout [String], keepAtLeastOne: Bool, maxCount: Int? = nil) {
     if let index = selection.firstIndex(of: id) {
         if keepAtLeastOne && selection.count == 1 { return }
         selection.remove(at: index)
     } else {
+        // Лимит набран — новую галочку не ставим (сначала снять одну).
+        if let maxCount, selection.count >= maxCount { return }
         selection.append(id)
     }
 }
@@ -266,6 +270,7 @@ private struct MultiSelectSheet: View {
     let options: [MultiSelectOption]
     @Binding var selection: [String]
     let allLabel: String?
+    var maxSelection: Int? = nil
 
     var body: some View {
         NavigationStack {
@@ -281,8 +286,12 @@ private struct MultiSelectSheet: View {
                 Section {
                     ForEach(options) { option in
                         MultiSelectRow(title: option.title, icon: option.icon, checked: selection.contains(option.id)) {
-                            toggleItem(option.id, in: &selection, keepAtLeastOne: allLabel == nil)
+                            toggleItem(option.id, in: &selection, keepAtLeastOne: allLabel == nil, maxCount: maxSelection)
                         }
+                    }
+                } footer: {
+                    if let maxSelection {
+                        Text(String(format: loc.t("task_categories_max"), maxSelection))
                     }
                 }
             }
@@ -451,7 +460,8 @@ struct TaskCategoriesPickerButton: View {
                 )
             },
             selection: $categories,
-            summary: HubCategories.label(for: categories, language: loc.current)
+            summary: HubCategories.label(for: categories, language: loc.current),
+            maxSelection: HubCategories.maxPerTask
         )
     }
 }

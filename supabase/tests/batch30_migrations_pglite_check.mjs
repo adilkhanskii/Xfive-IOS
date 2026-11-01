@@ -102,6 +102,8 @@ assert.deepEqual(rows[0], { country_codes: ['KZ','RU'], categories: ['design','s
 // ограничения
 await assert.rejects(q(`insert into public.tasks(author_id,title,country_codes) values ($1,'bad',array['KAZ'])`, [U.author]));
 await assert.rejects(q(`insert into public.tasks(author_id,title,cities) values ($1,'bad',array['A'])`, [U.author]));
+// не больше 3 категорий
+await assert.rejects(q(`insert into public.tasks(author_id,title,categories) values ($1,'bad',array['seo','smm','ugc','design'])`, [U.author]));
 
 // уведомления по любой категории: задание seo+smm → spec (smm, проверенный) сразу, other (seo) в очередь
 await db.exec(`delete from public.social_notifications; delete from public.task_notification_queue;`);

@@ -149,7 +149,8 @@ begin
   if not exists (select 1 from pg_constraint where conrelid = 'public.tasks'::regclass
                   and conname = 'tasks_categories_valid') then
     alter table public.tasks add constraint tasks_categories_valid check (
-      public.x5_task_text_items_valid(categories, 10, 2, 60)
+      -- до 3 категорий (Адильхан 30.10), как лимит в iOS и вебе
+      public.x5_task_text_items_valid(categories, 3, 2, 60)
     ) not valid;
   end if;
 end;

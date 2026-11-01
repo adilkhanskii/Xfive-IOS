@@ -13,7 +13,8 @@ struct CreateTaskView: View {
     @State private var budget: String = ""
     // Несколько значений (Адильхан 30.10): пустые страны/города = «Все».
     @State private var categories: [String] = ["marketing"]
-    @State private var countryCodes: [String] = ["KZ"]
+    // По умолчанию «Все страны» / «Все города» (Адильхан 30.10) — профиль не подставляем.
+    @State private var countryCodes: [String] = []
     @State private var cities: [String] = []
     @State private var deadline: Date = Calendar.current.date(byAdding: .day, value: 7, to: Date()) ?? Date()
     @State private var hasDeadline: Bool = false
@@ -68,13 +69,6 @@ struct CreateTaskView: View {
             }
         }
         .preferredColorScheme(.dark)
-        .onAppear {
-            if let profileCountry = currentUser.profile?.countryCode, !profileCountry.isEmpty {
-                countryCodes = [profileCountry]
-            }
-            let profileCity = (currentUser.profile?.city ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            if cities.isEmpty, profileCity.count >= 2 { cities = [profileCity] }
-        }
         .onChange(of: countryCodes) { newCountries in
             cities = CISLocations.keptCities(cities, in: newCountries)
         }
