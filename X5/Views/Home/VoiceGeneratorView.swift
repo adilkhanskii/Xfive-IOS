@@ -500,7 +500,22 @@ struct VoiceGeneratorView: View {
         .x5ClearGlass(cornerRadius: 18, highlight: 0.08)
     }
 
+    /// Над «Пополнить баланс» — сколько нужно и сколько есть (Адильхан 01.11).
+    /// loc через shared: в этом экране нет EnvironmentObject локализации.
     private var generateButton: some View {
+        VStack(spacing: 8) {
+            if needsTopUp {
+                Text(String(format: LocalizationService.shared.t("gen_need_credits"), creditCost, currentCredits ?? 0))
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+            }
+            generateActionButton
+        }
+    }
+
+    private var generateActionButton: some View {
         Button {
             if needsTopUp {
                 showingStore = true
