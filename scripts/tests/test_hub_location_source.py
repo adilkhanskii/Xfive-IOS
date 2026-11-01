@@ -12,7 +12,13 @@ class HubLocationSourceTests(unittest.TestCase):
 
         self.assertIn("selectedCountryCode", hub)
         self.assertIn("selectedCity", hub)
-        self.assertGreaterEqual(hub.count("locationMatches(countryCode:"), 4)
+        # Специалисты — по одиночным полям; задания — по массивам (несколько стран/городов, 30.10).
+        self.assertGreaterEqual(hub.count("locationMatches(countryCode:"), 1)
+        self.assertGreaterEqual(hub.count("taskLocationMatches"), 4)
+        self.assertIn("task.countryCodes", hub)
+        self.assertIn("task.cities", hub)
+        self.assertIn('case countryCodesRaw = "country_codes"', service)
+        self.assertIn('case citiesRaw = "cities"', service)
         self.assertIn("country_code,city", service)
         self.assertIn('case countryCode = "country_code"', service)
 

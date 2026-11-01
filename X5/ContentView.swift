@@ -4,6 +4,7 @@ struct ContentView: View {
     @EnvironmentObject private var auth: Auth
     @EnvironmentObject private var currentUser: CurrentUser
     @EnvironmentObject private var subscription: Subscription
+    @EnvironmentObject private var loc: LocalizationService
     @AppStorage("x5.face_id_enabled") private var faceIDEnabled = false
     @Environment(\.scenePhase) private var scenePhase
     @State private var isLocked = false
@@ -15,6 +16,8 @@ struct ContentView: View {
     @State private var hasUnlockedThisSession = false
     @State private var routedUserId: String?
     @State private var profileRoutingError: String?
+    /// Начислено кредитов подарком новым — показываем один раз.
+    @State private var signupBonusCredits: Int?
 
     var body: some View {
         ZStack {
@@ -40,6 +43,17 @@ struct ContentView: View {
             }
         }
         .task(id: auth.userId) { await refreshProfileBeforeRouting() }
+        .alert(
+            loc.t("signup_bonus_title"),
+            isPresented: Binding(
+                get: { signupBonusCredits != nil },
+                set: { if !$0 { signupBonusCredits = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(loc.t("signup_bonus_message").replacingOccurrences(of: "{n}", with: "\(signupBonusCredits ?? 0)"))
+        }
         .onChange(of: isLocked) { locked in
             // Mark unlocked once so we don't re-prompt on every onAppear within this session.
             if !locked { hasUnlockedThisSession = true }
@@ -136,5 +150,18 @@ struct ContentView: View {
         }
         subscription.sync(from: profile)
         routedUserId = uid
+        await claimSignupBonusIfNeeded(userId: uid, accessToken: token)
+    }
+
+    /// Профиль загружен → один раз спрашиваем сервер про бонус новым (200 кредитов).
+    private func claimSignupBonusIfNeeded(userId: String, accessToken: String) async {
+        guard let claim = await SignupBonusService.claimIfNeeded(userId: userId, accessToken: accessToken),
+              claim.status == "granted",
+              auth.userId == userId
+        else { return }
+        if let balance = claim.balance {
+            currentUser.applyCreditsRemaining(balance, for: currentUser.operationContext(for: userId))
+        }
+        signupBonusCredits = claim.credits ?? 200
     }
 }

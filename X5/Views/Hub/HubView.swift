@@ -501,7 +501,7 @@ struct HubView: View {
         case .tasks:
             return service.tasks
                 .filter { !BlockList.contains($0.authorId) }
-                .filter { locationMatches(countryCode: $0.countryCode, city: $0.city) }
+                .filter(taskLocationMatches)
                 .count
         }
     }
@@ -519,10 +519,10 @@ struct HubView: View {
     private var taskCategoryCounts: [String: Int] {
         var counts: [String: Int] = [:]
         for task in service.tasks
-        where !BlockList.contains(task.authorId)
-            && locationMatches(countryCode: task.countryCode, city: task.city) {
-            if let category = task.category {
-                counts[normalizedHubCategory(category), default: 0] += 1
+        where !BlockList.contains(task.authorId) && taskLocationMatches(task) {
+            // Задание с несколькими категориями считается в каждой, но один раз.
+            for id in Set(task.categories.map { normalizedHubCategory($0) }) {
+                counts[id, default: 0] += 1
             }
         }
         return counts
@@ -718,9 +718,9 @@ struct HubView: View {
     private var filteredTasks: [HubTask] {
         let visible = service.tasks
             .filter { !BlockList.contains($0.authorId) }
-            .filter { locationMatches(countryCode: $0.countryCode, city: $0.city) }
-        let filtered = visible.filter {
-            taskBrowseState.includes(categoryId: normalizedHubCategory($0.category))
+            .filter(taskLocationMatches)
+        let filtered = visible.filter { task in
+            taskCategoryIds(task).contains { taskBrowseState.includes(categoryId: $0) }
         }
         guard taskBrowseState.selectedCategoryIds.isEmpty,
               !taskBrowseState.preferredCategoryIds.isEmpty
@@ -729,12 +729,10 @@ struct HubView: View {
         // Stable partition: profile matches appear first while every open task
         // remains visible in the server's original newest-first order.
         return filtered.enumerated().sorted { lhs, rhs in
-            let lhsPreferred = taskBrowseState.preferredCategoryIds.contains(
-                normalizedHubCategory(lhs.element.category)
-            )
-            let rhsPreferred = taskBrowseState.preferredCategoryIds.contains(
-                normalizedHubCategory(rhs.element.category)
-            )
+            let lhsPreferred = !taskBrowseState.preferredCategoryIds
+                .isDisjoint(with: taskCategoryIds(lhs.element))
+            let rhsPreferred = !taskBrowseState.preferredCategoryIds
+                .isDisjoint(with: taskCategoryIds(rhs.element))
             if lhsPreferred != rhsPreferred { return lhsPreferred && !rhsPreferred }
             return lhs.offset < rhs.offset
         }.map(\.element)
@@ -766,6 +764,28 @@ struct HubView: View {
         let requestedCity = selectedCity.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !requestedCity.isEmpty else { return true }
         return city?.range(of: requestedCity, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+    }
+
+    /// Задание подходит: страны пусто («Все страны») или есть выбранная;
+    /// города пусто («Все города») или любой совпал по прежнему нечёткому сравнению.
+    private func taskLocationMatches(_ task: HubTask) -> Bool {
+        let countries = task.countryCodes
+        if !selectedCountryCode.isEmpty, !countries.isEmpty,
+           !countries.contains(where: { $0.caseInsensitiveCompare(selectedCountryCode) == .orderedSame }) {
+            return false
+        }
+        let requestedCity = selectedCity.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cities = task.cities
+        guard !requestedCity.isEmpty, !cities.isEmpty else { return true }
+        return cities.contains {
+            $0.range(of: requestedCity, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+        }
+    }
+
+    /// Без категории — «other», как раньше normalizedHubCategory(nil).
+    private func taskCategoryIds(_ task: HubTask) -> Set<String> {
+        let ids = Set(task.categories.map { normalizedHubCategory($0) })
+        return ids.isEmpty ? ["other"] : ids
     }
 
     private func loadHubTasks() async {
@@ -1023,9 +1043,18 @@ private struct TaskRow: View {
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(.white)
                         .lineLimit(2)
-                    Text(HubCategories.label(for: task.category, language: loc.current))
+                    Text(HubCategories.label(for: task.categories, language: loc.current))
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(.white.opacity(0.58))
+                        .lineLimit(1)
+                    Text(task.locationLabel(
+                        allCountries: loc.t("hub_all_countries"),
+                        allCities: loc.t("location_all_cities"),
+                        compact: true
+                    ))
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.45))
+                    .lineLimit(1)
                 }
                 Spacer()
                 if let budget = task.budget, !budget.isEmpty {

@@ -37,7 +37,7 @@ struct TaskDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 8) {
-                    Text(HubCategories.label(for: task.category, language: loc.current).uppercased())
+                    Text(HubCategories.label(for: task.categories, language: loc.current).uppercased())
                         .font(.system(size: 10, weight: .heavy))
                         .tracking(1.2)
                         .foregroundColor(.accentColor)
@@ -53,12 +53,17 @@ struct TaskDetailView: View {
                     .font(.system(size: 22, weight: .heavy))
                     .foregroundColor(.white)
 
-                if let city = task.city, !city.isEmpty {
-                    let country = task.countryCode.flatMap(CISLocations.countryName(for:))
-                    Label([city, country].compactMap { $0 }.joined(separator: ", "), systemImage: "mappin.and.ellipse")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.68))
-                }
+                // Все страны и города задания полностью (в карточках — сокращённо).
+                Label(
+                    task.locationLabel(
+                        allCountries: loc.t("hub_all_countries"),
+                        allCities: loc.t("location_all_cities"),
+                        compact: false
+                    ),
+                    systemImage: "mappin.and.ellipse"
+                )
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.white.opacity(0.68))
 
                 if let desc = task.description, !desc.isEmpty {
                     Text(desc)

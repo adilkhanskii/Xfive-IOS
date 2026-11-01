@@ -79,9 +79,9 @@ final class HubTaskManagementTests: XCTestCase {
             title: "Updated",
             description: "New details",
             budget: "75000",
-            category: "design",
-            countryCode: "KZ",
-            city: "Алматы",
+            categories: ["design", "smm"],
+            countryCodes: ["KZ", "RU"],
+            cities: ["Алматы", "Москва"],
             deadline: nil,
             accessToken: "owner-token"
         )
@@ -98,11 +98,48 @@ final class HubTaskManagementTests: XCTestCase {
         XCTAssertEqual(body["category"] as? String, "design")
         XCTAssertEqual(body["country_code"] as? String, "KZ")
         XCTAssertEqual(body["city"] as? String, "Алматы")
+        // Новые массивы + одиночные = первый элемент (для 1.1.18/1.1.19).
+        XCTAssertEqual(body["categories"] as? [String], ["design", "smm"])
+        XCTAssertEqual(body["country_codes"] as? [String], ["KZ", "RU"])
+        XCTAssertEqual(body["cities"] as? [String], ["Алматы", "Москва"])
         XCTAssertTrue(body["deadline"] is NSNull)
         XCTAssertNil(body["author_id"])
         XCTAssertNil(body["status"])
         XCTAssertEqual(updated?.title, "Updated")
         XCTAssertEqual(service.myTasks.first?.title, "Updated")
+    }
+
+    @MainActor
+    func testLocationCategoryFieldsSendNullSinglesForAllCountriesAndCities() {
+        let fields = HubService.locationCategoryFields(categories: ["targeting"], countryCodes: [], cities: [])
+        XCTAssertEqual(fields["categories"] as? [String], ["targeting"])
+        XCTAssertEqual(fields["category"] as? String, "targeting")
+        XCTAssertEqual(fields["country_codes"] as? [String], [])
+        XCTAssertTrue(fields["country_code"] is NSNull)
+        XCTAssertEqual(fields["cities"] as? [String], [])
+        XCTAssertTrue(fields["city"] is NSNull)
+    }
+
+    func testTaskDecodesArraysAndFallsBackToSingleFieldsBeforeMigration() throws {
+        let old = try JSONDecoder().decode(HubTask.self, from: Data("""
+        {"id":"a","author_id":"b","title":"Old","category":"smm","country_code":"KZ","city":"Алматы","status":"open"}
+        """.utf8))
+        XCTAssertEqual(old.categories, ["smm"])
+        XCTAssertEqual(old.countryCodes, ["KZ"])
+        XCTAssertEqual(old.cities, ["Алматы"])
+
+        let new = try JSONDecoder().decode(HubTask.self, from: Data("""
+        {"id":"a","author_id":"b","title":"New","category":"smm","country_code":null,"city":null,"status":"open","categories":["smm","targeting"],"country_codes":[],"cities":[]}
+        """.utf8))
+        XCTAssertEqual(new.categories, ["smm", "targeting"])
+        XCTAssertEqual(new.countryCodes, [])
+        XCTAssertEqual(new.cities, [])
+    }
+
+    func testCompactLocationLabel() {
+        XCTAssertEqual(CISLocations.compactLabel([], allLabel: "Все страны"), "Все страны")
+        XCTAssertEqual(CISLocations.compactLabel(["Казахстан", "Россия"], allLabel: "-"), "Казахстан, Россия")
+        XCTAssertEqual(CISLocations.compactLabel(["Казахстан", "Россия", "Узбекистан"], allLabel: "-"), "Казахстан +2")
     }
 
     @MainActor
