@@ -250,7 +250,8 @@ struct ImageGeneratorView: View {
             .disabled(isGenerating || category.id == "logo")
 
             HStack {
-                Label("\(totalCreditCost)", systemImage: "creditcard")
+                // Было голое «60» — непонятно, что это (Адильхан 01.11).
+                Label(String(format: loc.t("gen_cost_credits"), totalCreditCost), systemImage: "creditcard")
                 Spacer()
                 Text(balanceText)
             }
@@ -811,7 +812,21 @@ struct ImageGeneratorView: View {
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
+    /// Над «Пополнить баланс» — сколько нужно (с учётом количества) и сколько есть (Адильхан 01.11).
     private var generateButton: some View {
+        VStack(spacing: 8) {
+            if needsTopUp {
+                Text(String(format: loc.t("gen_need_credits"), totalCreditCost, currentCredits ?? 0))
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.55))
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+            }
+            generateActionButton
+        }
+    }
+
+    private var generateActionButton: some View {
         Button {
             X5Feedback.impact(.medium)
             if needsTopUp {
