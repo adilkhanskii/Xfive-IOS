@@ -1,4 +1,4 @@
-"""Lock App Store version 1.1.19 releaseType (AFTER_APPROVAL, or MANUAL via X5_RELEASE_TYPE)."""
+"""Lock App Store version 1.1.20 releaseType (AFTER_APPROVAL, or MANUAL via X5_RELEASE_TYPE)."""
 
 from __future__ import annotations
 
@@ -8,10 +8,10 @@ import time
 from typing import Protocol
 
 
-EXPECTED_VERSION = "1.1.19"
-EXPECTED_BUILD = "267"  # 30.10: 1.1.18 (266) в продаже → 1.1.19 (267): голос по описанию сохраняется, свой голос включён
+EXPECTED_VERSION = "1.1.20"
+EXPECTED_BUILD = "268"  # 01.11: 1.1.19 (267) в продаже → 1.1.20 (268): несколько стран/городов/категорий, «Пополнить баланс», бонус новым
 TARGET_RELEASE_TYPE = "AFTER_APPROVAL"
-# 22.10 Диас (tg 8553): 1.1.15 выпускали вручную (X5_RELEASE_TYPE=MANUAL); 24.10 (tg 9066) 1.1.16, 1.1.17, 1.1.18 и 1.1.19 — AFTER_APPROVAL.
+# 22.10 Диас (tg 8553): 1.1.15 выпускали вручную (X5_RELEASE_TYPE=MANUAL); 24.10 (tg 9066) 1.1.16–1.1.20 — AFTER_APPROVAL.
 ALLOWED_RELEASE_TYPES = frozenset({"AFTER_APPROVAL", "MANUAL"})
 SAFE_APP_STORE_STATES = frozenset(
     {
