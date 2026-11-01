@@ -75,7 +75,7 @@ class ReleaseVersionSourceTests(unittest.TestCase):
         self.assertEqual(runtime_build_number, "270")
         self.assertEqual(fastlane_version, marketing_version)
         self.assertIn(
-            f"Version {marketing_version} build 268",
+            f"Version {marketing_version} build 270",
             review_notes,
         )
         self.assertIn(
@@ -83,7 +83,7 @@ class ReleaseVersionSourceTests(unittest.TestCase):
             submit_workflow,
         )
         self.assertIn(
-            'EXPECTED_BUILD: "268"',
+            'EXPECTED_BUILD: "270"',
             submit_workflow,
         )
         self.assertIn(
@@ -91,7 +91,7 @@ class ReleaseVersionSourceTests(unittest.TestCase):
             prepare_workflow,
         )
         self.assertIn(
-            'BUILD_NUMBER: "268"',
+            'BUILD_NUMBER: "270"',
             prepare_workflow,
         )
 
