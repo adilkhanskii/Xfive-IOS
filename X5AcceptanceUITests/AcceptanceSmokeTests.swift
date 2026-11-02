@@ -8,7 +8,7 @@ final class AcceptanceSmokeTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
-        app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US", "-x5.language", "en"]
+        app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US", "-x5.language", "en", "-x5.skipTrackingPrompt", "YES"]
         app.launch()
     }
 

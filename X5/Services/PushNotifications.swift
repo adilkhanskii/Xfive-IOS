@@ -350,6 +350,8 @@ final class X5AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCe
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        // Meta SDK: установка/запуск для рекламы iOS 14+ (без App ID — no-op).
+        MetaAnalytics.start(application, launchOptions: launchOptions)
         if let payload = launchOptions?[.remoteNotification] as? [AnyHashable: Any] {
             Task { @MainActor in AppDeepLinkRouter.shared.route(userInfo: payload) }
         }

@@ -432,6 +432,14 @@ final class IAPService: ObservableObject {
                         signedTransaction: verification.jwsRepresentation,
                         source: "purchase"
                     )
+                    if applyResult.isPurchaseSuccess {
+                        // Meta: покупка только после доставки сервером, сумма/валюта из App Store.
+                        MetaAnalytics.logPurchase(
+                            product: product,
+                            transactionID: transaction.id,
+                            isSubscription: product.type == .autoRenewable
+                        )
+                    }
 
                     if applyResult.isPurchaseSuccess,
                        IAPProductCatalog.kind(for: transaction.productID) == .verificationSubscription {

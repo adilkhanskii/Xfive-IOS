@@ -409,6 +409,8 @@ struct OnboardingView: View {
                     throw NSError(domain: "Onboarding", code: 401, userInfo: [NSLocalizedDescriptionKey: loc.t("onb_session_expired")])
                 }
                 try await patchProfile(role: role, token: token)
+                // Meta: регистрация завершена (без имени/почты — только событие).
+                MetaAnalytics.logCompletedRegistration()
                 if let uid = auth.userId {
                     await currentUser.load(userId: uid, accessToken: token)
                 }

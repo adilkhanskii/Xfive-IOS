@@ -17,9 +17,19 @@ packages:
   NextLevelSessionExporter:
     url: https://github.com/NextLevel/NextLevelSessionExporter.git
     revision: "1bb6e19731ff512f4652f8ce2a8f67c779b1598f"
+  # Meta (Facebook) SDK — App Events, AEM, SKAdNetwork для рекламы iOS 14+.
+  # Pinned to the v18.1.1 tag commit (built with Xcode 26, same as CI).
+  Facebook:
+    url: https://github.com/facebook/facebook-ios-sdk
+    revision: "80d0ee82f6370d1bace1431a80cb80575f98ee90"
 
 settings:
   base:
+    # Meta App ID / Client Token. Empty by default: the SDK stays off.
+    # Release builds get them from Release.xcconfig (written by CI from
+    # vars.FACEBOOK_APP_ID / secrets.FACEBOOK_CLIENT_TOKEN). Never commit the token.
+    FACEBOOK_APP_ID: ""
+    FACEBOOK_CLIENT_TOKEN: ""
     SWIFT_VERSION: "5.9"
     DEVELOPMENT_TEAM: F8LA8PC4U6
     MARKETING_VERSION: "1.1.20"
@@ -39,6 +49,8 @@ targets:
         product: TUSKit
       - package: NextLevelSessionExporter
         product: NextLevelSessionExporter
+      - package: Facebook
+        product: FacebookCore
     sources:
       - path: X5
     resources:
@@ -69,6 +81,24 @@ targets:
           - CFBundleURLName: com.googleusercontent.apps.931639129066-ft7bod2n3ugi4cc3j1l68avcqtq3rv2j
             CFBundleURLSchemes:
               - com.googleusercontent.apps.931639129066-ft7bod2n3ugi4cc3j1l68avcqtq3rv2j
+          # Meta SDK: fb<App ID>:// (ссылки из рекламы / AEM)
+          - CFBundleURLName: com.x5studio.app.facebook
+            CFBundleURLSchemes:
+              - fb$(FACEBOOK_APP_ID)
+        # Meta SDK (X5/Services/MetaAnalytics.swift). Empty App ID = SDK off.
+        FacebookAppID: $(FACEBOOK_APP_ID)
+        FacebookClientToken: $(FACEBOOK_CLIENT_TOKEN)
+        FacebookDisplayName: Xfive marketing
+        FacebookAutoLogAppEventsEnabled: true
+        FacebookAdvertiserIDCollectionEnabled: true
+        LSApplicationQueriesSchemes:
+          - fbapi
+          - fb-messenger-share-api
+        NSUserTrackingUsageDescription: "Your data is used to measure which Xfive marketing ads work and to show you more relevant ads. You can change this anytime in Settings."
+        # Meta SKAdNetwork IDs (developers.facebook.com/docs/SKAdNetwork)
+        SKAdNetworkItems:
+          - SKAdNetworkIdentifier: v9wttpbfk9.skadnetwork
+          - SKAdNetworkIdentifier: n38lu8286q.skadnetwork
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         UILaunchScreen:
