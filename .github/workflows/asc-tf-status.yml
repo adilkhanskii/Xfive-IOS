@@ -26,7 +26,7 @@ jobs:
   status:
     runs-on: ubuntu-latest
     environment: app-store-production
-    timeout-minutes: 15
+    timeout-minutes: 40
     env:
       ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
       ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
@@ -54,14 +54,17 @@ jobs:
           import os, base64, time, json, sys
           import jwt, requests
 
-          token = jwt.encode(
-              {"iss": os.environ["ASC_API_ISSUER_ID"], "iat": int(time.time()),
-               "exp": int(time.time()) + 600, "aud": "appstoreconnect-v1"},
-              base64.b64decode(os.environ["ASC_API_KEY_BASE64"]),
-              algorithm="ES256",
-              headers={"kid": os.environ["ASC_API_KEY_ID"], "typ": "JWT"},
-          )
-          h = {"Authorization": f"Bearer {token}"}
+          def auth():
+              # токен живёт 10 мин — при долгом ожидании берём новый
+              token = jwt.encode(
+                  {"iss": os.environ["ASC_API_ISSUER_ID"], "iat": int(time.time()),
+                   "exp": int(time.time()) + 600, "aud": "appstoreconnect-v1"},
+                  base64.b64decode(os.environ["ASC_API_KEY_BASE64"]),
+                  algorithm="ES256",
+                  headers={"kid": os.environ["ASC_API_KEY_ID"], "typ": "JWT"},
+              )
+              return {"Authorization": f"Bearer {token}"}
+          h = auth()
           base = "https://api.appstoreconnect.apple.com/v1"
 
           r = requests.get(f"{base}/apps?filter[bundleId]={os.environ['BUNDLE_ID']}", headers=h)
@@ -70,25 +73,38 @@ jobs:
 
           want = os.environ["BUILD_NUMBER"]
 
-          # 1. Get build (no includes — some are forbidden by API)
-          r = requests.get(
-              f"{base}/builds",
-              headers=h,
-              params={
-                  "filter[app]": app_id,
-                  "filter[preReleaseVersion.platform]": "IOS",
-                  "limit": 200,
-                  "sort": "-uploadedDate",
-              },
-          )
-          r.raise_for_status()
-          payload = r.json()
+          # 1. Get build (no includes — some are forbidden by API).
+          # Свежая загрузка Apple обрабатывает 5–30 мин: «нет сборки» или PROCESSING —
+          # это ожидание, а не ошибка. Падаем только на FAILED/INVALID или если
+          # за 30 мин сборка так и не появилась/не обработалась.
           included = {}
-
-          build = next((b for b in payload["data"]
-                       if b["attributes"]["version"] == want), None)
-          if not build:
-              sys.exit(f"Build {want} not found")
+          deadline = time.time() + 30 * 60
+          build = None
+          while True:
+              h = auth()
+              r = requests.get(
+                  f"{base}/builds",
+                  headers=h,
+                  params={
+                      "filter[app]": app_id,
+                      "filter[preReleaseVersion.platform]": "IOS",
+                      "limit": 200,
+                      "sort": "-uploadedDate",
+                  },
+              )
+              r.raise_for_status()
+              payload = r.json()
+              build = next((b for b in payload["data"]
+                           if b["attributes"]["version"] == want), None)
+              state = build["attributes"].get("processingState") if build else None
+              if state in ("FAILED", "INVALID"):
+                  sys.exit(f"Build {want} rejected by Apple: processingState={state}")
+              if build and state == "VALID":
+                  break
+              if time.time() > deadline:
+                  sys.exit(f"Build {want} still {'processing' if build else 'not found'} after 30 min")
+              print(f"Build {want}: {state or 'not visible yet'} — waiting 60s", flush=True)
+              time.sleep(60)
 
           attrs = build["attributes"]
           print(f"\n=== Build {want} ===")
