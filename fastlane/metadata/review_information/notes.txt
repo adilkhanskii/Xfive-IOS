@@ -1,4 +1,4 @@
-Xfive marketing. Version 1.1.20 build 270.
+Xfive marketing. Version 1.1.20 build 271.
 New in 1.1.20: a task in Hub can target several countries, cities and up to 3
 categories ("All countries" / "All cities" by default); when credits are not
 enough, AI tools show a "Top up balance" button that opens the in-app Store;
@@ -7,6 +7,8 @@ the first 1000 new accounts with a confirmed email get 200 free credits once
 the chat input grows up to 5 lines; AI tools show "Cost: N credits" and, when
 credits are not enough, "N credits needed"; the app owner (admin only, checked
 by the server) can pause the new-user bonus or change its size and limit.
+Build 271 also: the app owner (admin only, checked by the server) can grant
+credits to an account found by email, nickname or name; every grant is logged.
 This update keeps the reviewed 1.1.10 payment safeguards: the selected StoreKit
 product is validated before any purchase success is reported and credit
 confirmation messages stay explicit. This build adds a premium tier to AI
