@@ -54,7 +54,7 @@ class SetAfterApprovalContractTests(unittest.TestCase):
                 return [self.version]
 
             def get_attached_build(self, version_id):
-                return {"id": "build-270", "attributes": {"version": "270", "processingState": "VALID", "expired": False}}
+                return {"id": "build-271", "attributes": {"version": "271", "processingState": "VALID", "expired": False}}
 
             def update_release_type(self, version_id, release_type):
                 self.updates.append((version_id, release_type))
@@ -64,16 +64,16 @@ class SetAfterApprovalContractTests(unittest.TestCase):
                 return self.version
 
         kept = FakeClient("MANUAL")
-        result = module.set_after_approval(kept, bundle_id="com.x5studio.app", version_string="1.1.20", build_number="270", target_release_type="MANUAL")
+        result = module.set_after_approval(kept, bundle_id="com.x5studio.app", version_string="1.1.20", build_number="271", target_release_type="MANUAL")
         self.assertEqual(kept.updates, [])
         self.assertEqual(result["releaseType"], "MANUAL")
 
         switched = FakeClient("AFTER_APPROVAL")
-        module.set_after_approval(switched, bundle_id="com.x5studio.app", version_string="1.1.20", build_number="270", target_release_type="MANUAL")
+        module.set_after_approval(switched, bundle_id="com.x5studio.app", version_string="1.1.20", build_number="271", target_release_type="MANUAL")
         self.assertEqual(switched.updates, [("version-117", "MANUAL")])
 
         with self.assertRaises(ValueError):
-            module.set_after_approval(FakeClient("MANUAL"), bundle_id="com.x5studio.app", version_string="1.1.20", build_number="270", target_release_type="SCHEDULED")
+            module.set_after_approval(FakeClient("MANUAL"), bundle_id="com.x5studio.app", version_string="1.1.20", build_number="271", target_release_type="SCHEDULED")
 
     def test_submit_workflow_requests_after_approval_release(self):
         workflow = (pathlib.Path(__file__).resolve().parents[2] / ".github" / "workflows" / "asc-release-submit.yml").read_text(encoding="utf-8")
@@ -107,9 +107,9 @@ class SetAfterApprovalContractTests(unittest.TestCase):
             def get_attached_build(self, version_id):
                 self.version_id = version_id
                 return {
-                    "id": "build-270",
+                    "id": "build-271",
                     "attributes": {
-                        "version": "270",
+                        "version": "271",
                         "processingState": "VALID",
                         "expired": False,
                     },
@@ -127,7 +127,7 @@ class SetAfterApprovalContractTests(unittest.TestCase):
             client,
             bundle_id="com.x5studio.app",
             version_string="1.1.20",
-            build_number="270",
+            build_number="271",
         )
 
         self.assertEqual(client.updates, [("version-116", "AFTER_APPROVAL")])
@@ -138,7 +138,7 @@ class SetAfterApprovalContractTests(unittest.TestCase):
             client,
             bundle_id="com.x5studio.app",
             version_string="1.1.20",
-            build_number="270",
+            build_number="271",
         )
         self.assertEqual(len(client.updates), 1)
 
@@ -166,9 +166,9 @@ class SetAfterApprovalContractTests(unittest.TestCase):
 
             def get_attached_build(self, _version_id):
                 return {
-                    "id": "build-270",
+                    "id": "build-271",
                     "attributes": {
-                        "version": "270",
+                        "version": "271",
                         "processingState": "VALID",
                         "expired": False,
                     },
@@ -182,7 +182,7 @@ class SetAfterApprovalContractTests(unittest.TestCase):
 
         client = UnsafeClient()
         for version, build in (
-            ("1.1.5", "270"),
+            ("1.1.5", "271"),
             ("1.1.20", "226"),
             ("1.1.18", "266"),
         ):
@@ -227,9 +227,9 @@ class SetAfterApprovalContractTests(unittest.TestCase):
 
                     def get_attached_build(self, _version_id):
                         return {
-                            "id": "build-270",
+                            "id": "build-271",
                             "attributes": {
-                                "version": "270",
+                                "version": "271",
                                 "processingState": "VALID",
                                 "expired": False,
                             },
@@ -247,7 +247,7 @@ class SetAfterApprovalContractTests(unittest.TestCase):
                     client,
                     bundle_id="com.x5studio.app",
                     version_string="1.1.20",
-                    build_number="270",
+                    build_number="271",
                 )
                 self.assertEqual(result["appStoreState"], state)
                 self.assertEqual(result["releaseType"], "AFTER_APPROVAL")
@@ -296,18 +296,18 @@ class SetAfterApprovalContractTests(unittest.TestCase):
                         client,
                         bundle_id="com.x5studio.app",
                         version_string="1.1.20",
-                        build_number="270",
+                        build_number="271",
                     )
                 self.assertEqual(client.updates, [])
 
     def test_release_audit_workflow_exposes_explicit_guarded_action(self):
-        self.assertEqual(load_script().EXPECTED_BUILD, "270")
+        self.assertEqual(load_script().EXPECTED_BUILD, "271")
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
         self.assertIn('default: "audit"', workflow)
         self.assertIn("set_after_approval", workflow)
         self.assertIn("scripts/asc_set_after_approval.py", workflow)
         self.assertIn('EXPECTED_VERSION: "1.1.20"', workflow)
-        self.assertIn('EXPECTED_BUILD: "270"', workflow)
+        self.assertIn('EXPECTED_BUILD: "271"', workflow)
 
     def test_standalone_submit_locks_and_rechecks_after_approval(self):
         workflow = SUBMIT_WORKFLOW_PATH.read_text(encoding="utf-8")
