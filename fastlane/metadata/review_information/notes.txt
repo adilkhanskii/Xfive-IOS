@@ -1,14 +1,13 @@
-Xfive marketing. Version 1.1.20 build 271.
-New in 1.1.20: a task in Hub can target several countries, cities and up to 3
-categories ("All countries" / "All cities" by default); when credits are not
-enough, AI tools show a "Top up balance" button that opens the in-app Store;
-the first 1000 new accounts with a confirmed email get 200 free credits once
-(one per device), granted by the server, no purchase involved. Build 270 also:
-the chat input grows up to 5 lines; AI tools show "Cost: N credits" and, when
-credits are not enough, "N credits needed"; the app owner (admin only, checked
-by the server) can pause the new-user bonus or change its size and limit.
-Build 271 also: the app owner (admin only, checked by the server) can grant
+Xfive marketing. Version 1.1.21 build 271.
+New in 1.1.21: the app owner (admin only, checked by the server) can grant
 credits to an account found by email, nickname or name; every grant is logged.
+The app now includes the Meta (Facebook) SDK for ad attribution and app events
+(see App Tracking Transparency below).
+1.1.20 (live) added: tasks in Hub for several countries, cities and up to 3
+categories; a "Top up balance" button that opens the in-app Store; "Cost: N
+credits" in AI tools; 200 free credits once for the first 1000 new accounts
+with a confirmed email (server-granted, no purchase involved); owner-only
+controls for that bonus.
 This update keeps the reviewed 1.1.10 payment safeguards: the selected StoreKit
 product is validated before any purchase success is reported and credit
 confirmation messages stay explicit. This build adds a premium tier to AI
@@ -38,7 +37,7 @@ the user declines, no IDFA is collected; Meta then measures only through
 Aggregated Event Measurement and SKAdNetwork. No email, name or phone number
 is sent to Meta. App Privacy is updated accordingly.
 
-Mainland China remains excluded from availability. Existing privacy disclosures,
+Mainland China remains excluded from availability. Other privacy disclosures,
 AI capabilities, account deletion and portfolio moderation are unchanged.
 Portfolio moderation uses OpenAI and voiceover uses MiniMax and ElevenLabs, as
 disclosed in the privacy policy.
