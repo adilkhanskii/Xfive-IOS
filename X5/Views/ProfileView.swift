@@ -29,6 +29,9 @@ struct ProfileView: View {
     @State private var signupBonusStats: SignupBonusStats?
     /// Шторка управления бонусом (пауза / подарок / лимит), Адильхан 01.11.
     @State private var showingSignupBonusSettings = false
+    /// Шторка «Начислить кредиты» и тост с новым балансом (владелец, Адильхан 02.11).
+    @State private var showingOwnerCredits = false
+    @State private var ownerCreditsToast: String?
     /// Счётчики обновляем только после настоящего фона, не после «неактивно»:
     /// галерея и Face ID на секунду делают приложение неактивным, и перерисовка
     /// профиля перезапускала галерею при выборе обложки (Адильхан 10.10).
@@ -109,6 +112,45 @@ struct ProfileView: View {
                         onSaved: { signupBonusStats = $0 }
                     )
                     .environmentObject(loc)
+                }
+            }
+            .sheet(isPresented: $showingOwnerCredits) {
+                OwnerCreditsSheet(
+                    search: { query in
+                        guard let token = await auth.freshAccessToken() else { return .failure(.search) }
+                        return await OwnerCreditsService.search(query: query, accessToken: token)
+                    },
+                    grant: { targetId, amount, note in
+                        guard let token = await auth.freshAccessToken() else { return .failure(.grant) }
+                        return await OwnerCreditsService.grant(targetId: targetId, amount: amount, note: note, accessToken: token)
+                    },
+                    onGranted: { user, amount, balance in
+                        showOwnerCreditsToast(
+                            loc.t("credits_ctl_done")
+                                .replacingOccurrences(of: "{n}", with: "\(amount)")
+                                .replacingOccurrences(of: "{user}", with: user.label)
+                                .replacingOccurrences(of: "{balance}", with: "\(balance)")
+                        )
+                    }
+                )
+                .environmentObject(loc)
+            }
+            .overlay(alignment: .top) {
+                if let ownerCreditsToast {
+                    Text(ownerCreditsToast)
+                        .font(.system(size: 14, weight: .heavy))
+                        .foregroundColor(.white)
+                        .multilineTextAlignment(.leading)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(Color(red: 0.06, green: 0.73, blue: 0.51))
+                        )
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .accessibilityIdentifier("profile.ownerCredits.toast")
                 }
             }
             .sheet(isPresented: $showingEdit) { EditProfileView() }
@@ -297,6 +339,9 @@ struct ProfileView: View {
             myTasksCard
             if let stats = signupBonusStats {
                 SignupBonusOwnerRow(stats: stats) { showingSignupBonusSettings = true }
+            }
+            if Roles.isDeveloper(email: auth.userEmail, userId: auth.userId) {
+                OwnerCreditsRow { showingOwnerCredits = true }
             }
             if let bio = currentUser.profile?.bio, !bio.isEmpty {
                 BioCard(text: bio)
@@ -537,6 +582,17 @@ struct ProfileView: View {
     }
 
     // MARK: - Credit store
+
+    /// Тост «Начислено N кредитов · баланс X: B» на 4 секунды.
+    private func showOwnerCreditsToast(_ text: String) {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { ownerCreditsToast = text }
+        Task {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            if ownerCreditsToast == text {
+                withAnimation(.easeOut(duration: 0.25)) { ownerCreditsToast = nil }
+            }
+        }
+    }
 
     /// Ошибка, нет функции или не владелец → строку не показываем.
     private func refreshSignupBonusStats() async {
