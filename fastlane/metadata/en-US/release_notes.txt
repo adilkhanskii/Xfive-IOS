@@ -1,1 +1,1 @@
-Several countries, cities and categories in tasks. Top up balance button and clear generation cost. Bonus for new users. Easier chat input.
+Owners can now grant credits to users right from the profile. Improved ad attribution and analytics. Bug fixes and stability improvements

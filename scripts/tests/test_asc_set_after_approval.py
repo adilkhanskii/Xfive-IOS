@@ -45,7 +45,7 @@ class SetAfterApprovalContractTests(unittest.TestCase):
         class FakeClient:
             def __init__(self, release_type):
                 self.updates = []
-                self.version = {"id": "version-117", "attributes": {"versionString": "1.1.20", "platform": "IOS", "appStoreState": "PREPARE_FOR_SUBMISSION", "releaseType": release_type}}
+                self.version = {"id": "version-117", "attributes": {"versionString": "1.1.21", "platform": "IOS", "appStoreState": "PREPARE_FOR_SUBMISSION", "releaseType": release_type}}
 
             def find_app_id(self, bundle_id):
                 return "app-1"
@@ -64,16 +64,16 @@ class SetAfterApprovalContractTests(unittest.TestCase):
                 return self.version
 
         kept = FakeClient("MANUAL")
-        result = module.set_after_approval(kept, bundle_id="com.x5studio.app", version_string="1.1.20", build_number="271", target_release_type="MANUAL")
+        result = module.set_after_approval(kept, bundle_id="com.x5studio.app", version_string="1.1.21", build_number="271", target_release_type="MANUAL")
         self.assertEqual(kept.updates, [])
         self.assertEqual(result["releaseType"], "MANUAL")
 
         switched = FakeClient("AFTER_APPROVAL")
-        module.set_after_approval(switched, bundle_id="com.x5studio.app", version_string="1.1.20", build_number="271", target_release_type="MANUAL")
+        module.set_after_approval(switched, bundle_id="com.x5studio.app", version_string="1.1.21", build_number="271", target_release_type="MANUAL")
         self.assertEqual(switched.updates, [("version-117", "MANUAL")])
 
         with self.assertRaises(ValueError):
-            module.set_after_approval(FakeClient("MANUAL"), bundle_id="com.x5studio.app", version_string="1.1.20", build_number="271", target_release_type="SCHEDULED")
+            module.set_after_approval(FakeClient("MANUAL"), bundle_id="com.x5studio.app", version_string="1.1.21", build_number="271", target_release_type="SCHEDULED")
 
     def test_submit_workflow_requests_after_approval_release(self):
         workflow = (pathlib.Path(__file__).resolve().parents[2] / ".github" / "workflows" / "asc-release-submit.yml").read_text(encoding="utf-8")
@@ -89,7 +89,7 @@ class SetAfterApprovalContractTests(unittest.TestCase):
                 self.version = {
                     "id": "version-116",
                     "attributes": {
-                        "versionString": "1.1.20",
+                        "versionString": "1.1.21",
                         "platform": "IOS",
                         "appStoreState": "WAITING_FOR_REVIEW",
                         "releaseType": "MANUAL",
@@ -126,7 +126,7 @@ class SetAfterApprovalContractTests(unittest.TestCase):
         result = module.set_after_approval(
             client,
             bundle_id="com.x5studio.app",
-            version_string="1.1.20",
+            version_string="1.1.21",
             build_number="271",
         )
 
@@ -137,7 +137,7 @@ class SetAfterApprovalContractTests(unittest.TestCase):
         module.set_after_approval(
             client,
             bundle_id="com.x5studio.app",
-            version_string="1.1.20",
+            version_string="1.1.21",
             build_number="271",
         )
         self.assertEqual(len(client.updates), 1)
@@ -156,7 +156,7 @@ class SetAfterApprovalContractTests(unittest.TestCase):
                     {
                         "id": "version-116",
                         "attributes": {
-                            "versionString": "1.1.20",
+                            "versionString": "1.1.21",
                             "platform": "IOS",
                             "appStoreState": "PENDING_DEVELOPER_RELEASE",
                             "releaseType": "MANUAL",
@@ -183,7 +183,7 @@ class SetAfterApprovalContractTests(unittest.TestCase):
         client = UnsafeClient()
         for version, build in (
             ("1.1.5", "271"),
-            ("1.1.20", "226"),
+            ("1.1.21", "226"),
             ("1.1.18", "266"),
         ):
             with self.subTest(version=version, build=build):
@@ -212,7 +212,7 @@ class SetAfterApprovalContractTests(unittest.TestCase):
                         self.version = {
                             "id": "version-116",
                             "attributes": {
-                                "versionString": "1.1.20",
+                                "versionString": "1.1.21",
                                 "platform": "IOS",
                                 "appStoreState": state,
                                 "releaseType": "MANUAL",
@@ -246,7 +246,7 @@ class SetAfterApprovalContractTests(unittest.TestCase):
                 result = module.set_after_approval(
                     client,
                     bundle_id="com.x5studio.app",
-                    version_string="1.1.20",
+                    version_string="1.1.21",
                     build_number="271",
                 )
                 self.assertEqual(result["appStoreState"], state)
@@ -268,7 +268,7 @@ class SetAfterApprovalContractTests(unittest.TestCase):
                         self.version = {
                             "id": "version-116",
                             "attributes": {
-                                "versionString": "1.1.20",
+                                "versionString": "1.1.21",
                                 "platform": "IOS",
                                 "appStoreState": state,
                                 "releaseType": "MANUAL",
@@ -295,7 +295,7 @@ class SetAfterApprovalContractTests(unittest.TestCase):
                     module.set_after_approval(
                         client,
                         bundle_id="com.x5studio.app",
-                        version_string="1.1.20",
+                        version_string="1.1.21",
                         build_number="271",
                     )
                 self.assertEqual(client.updates, [])
@@ -306,7 +306,7 @@ class SetAfterApprovalContractTests(unittest.TestCase):
         self.assertIn('default: "audit"', workflow)
         self.assertIn("set_after_approval", workflow)
         self.assertIn("scripts/asc_set_after_approval.py", workflow)
-        self.assertIn('EXPECTED_VERSION: "1.1.20"', workflow)
+        self.assertIn('EXPECTED_VERSION: "1.1.21"', workflow)
         self.assertIn('EXPECTED_BUILD: "271"', workflow)
 
     def test_standalone_submit_locks_and_rechecks_after_approval(self):
