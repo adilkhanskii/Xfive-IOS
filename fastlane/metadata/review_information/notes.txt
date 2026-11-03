@@ -29,6 +29,13 @@ has a capped isolated Sandbox allowance to exercise the purchase flow.
 Ordinary TestFlight accounts cannot receive spendable credits from Sandbox.
 Production purchases require Apple's signed transaction verification.
 
+App Tracking Transparency: the app now includes the Meta (Facebook) SDK to
+measure installs, launches, registrations and purchases from our ads. The ATT
+prompt is shown once, on the main screen after sign-in (never at launch). If
+the user declines, no IDFA is collected; Meta then measures only through
+Aggregated Event Measurement and SKAdNetwork. No email, name or phone number
+is sent to Meta. App Privacy is updated accordingly.
+
 Mainland China remains excluded from availability. Existing privacy disclosures,
 AI capabilities, account deletion and portfolio moderation are unchanged.
 Portfolio moderation uses OpenAI and voiceover uses MiniMax and ElevenLabs, as

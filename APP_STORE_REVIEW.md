@@ -180,6 +180,14 @@ ai,marketing,captions,content,creators,smm,instagram,tiktok,hire,freelance,hub,s
 
 Tracking: **No**.
 
+> ⚠️ С Meta SDK (ветка feat/ios-fbsdk-2026-11-02) это устарело. Перед отправкой
+> версии с SDK в App Privacy добавить: **Device ID** (IDFA) — Linked: no,
+> Tracking: **yes**, Purpose: Third-Party Advertising; **Product Interaction**
+> и **Purchase History** — Analytics / Third-Party Advertising, Tracking: yes.
+> Ответ «Do you or your third-party partners use data for tracking?» — **Yes**.
+> Политику конфиденциальности (site/privacy.html и x5site) дополнить строкой
+> про Meta (Facebook) SDK: события установки, запуска, регистрации и покупок.
+
 ### 3.3 Age Rating
 
 - User-generated content (chats, portfolio) → ставит ограничение **12+**.

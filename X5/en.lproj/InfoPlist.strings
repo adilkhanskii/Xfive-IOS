@@ -2,3 +2,4 @@
 "NSMicrophoneUsageDescription" = "Microphone access is needed to record voice messages in chats and a voice sample for your own AI voice.";
 "NSPhotoLibraryUsageDescription" = "Select photos and videos for courses, chats, portfolio, and AI tools.";
 "NSPhotoLibraryAddUsageDescription" = "Save generated images and videos to your photo library.";
+"NSUserTrackingUsageDescription" = "Your data is used to measure which Xfive marketing ads work and to show you more relevant ads. You can change this anytime in Settings.";

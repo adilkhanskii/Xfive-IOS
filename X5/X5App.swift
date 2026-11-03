@@ -54,6 +54,8 @@ struct X5App: App {
                 .onOpenURL { url in
                     // Forward custom-scheme callbacks to the Google Sign-In SDK.
                     GIDSignIn.sharedInstance.handle(url)
+                    // fb<AppID>:// и параметры клика по рекламе (AEM).
+                    MetaAnalytics.handle(url)
                 }
                 .task(id: auth.isAuthenticated) {
                     DiagnosticLogger.log(event: "auth_state",

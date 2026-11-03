@@ -121,6 +121,10 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :provisioningProfiles:${BUNDLE_ID} '${{ steps.profile.outputs.name }}'" ExportOptions.plist
 
       - name: Write Release.xcconfig with profile name
+        env:
+          # Meta SDK. Empty (not configured) = SDK stays off, build still passes.
+          FACEBOOK_APP_ID: ${{ vars.FACEBOOK_APP_ID }}
+          FACEBOOK_CLIENT_TOKEN: ${{ secrets.FACEBOOK_CLIENT_TOKEN }}
         run: |
           cat > Release.xcconfig <<EOF
           CODE_SIGN_STYLE = Manual
@@ -130,6 +134,8 @@ jobs:
           OTHER_CODE_SIGN_FLAGS = --keychain $RUNNER_TEMP/build.keychain-db
           ENABLE_ON_DEMAND_RESOURCES = NO
           ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO
+          FACEBOOK_APP_ID = ${FACEBOOK_APP_ID}
+          FACEBOOK_CLIENT_TOKEN = ${FACEBOOK_CLIENT_TOKEN}
           EOF
 
       - name: Build & archive
