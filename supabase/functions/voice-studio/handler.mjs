@@ -75,6 +75,17 @@ export function createVoiceStudioHandler(deps) {
         );
       }
       if (error?.keyRejected) return premiumUnavailable();
+      if (error?.code === "elevenlabs_voice_slots_full") {
+        // приложение покажет «Сервис голосов временно недоступен. Ничего не списано.»
+        console.warn("voice-studio: ElevenLabs voice slots full");
+        return json(
+          safeStudioError(
+            "provider_capacity",
+            "Voice service is at capacity. Nothing was charged.",
+          ),
+          503,
+        );
+      }
       if (error?.name === "ElevenLabsVoicesError") {
         return json(
           safeStudioError(
