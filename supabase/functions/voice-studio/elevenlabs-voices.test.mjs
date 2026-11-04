@@ -122,7 +122,9 @@ test("refuses to start without a key", () => {
 
 test("clone with full voice slots throws elevenlabs_voice_slots_full", async () => {
   const { instance } = client(() =>
-    Response.json({ detail: { status: "voice_limit_reached" } }, { status: 400 })
+    Response.json({ detail: { status: "voice_limit_reached" } }, {
+      status: 400,
+    })
   );
   const audio = new Blob([new Uint8Array(1024)], { type: "audio/mp4" });
   await assert.rejects(
