@@ -119,3 +119,16 @@ test("delete treats 404 as already gone", async () => {
 test("refuses to start without a key", () => {
   assert.throws(() => new ElevenLabsVoicesClient({ apiKey: "" }));
 });
+
+test("clone with full voice slots throws elevenlabs_voice_slots_full", async () => {
+  const { instance } = client(() =>
+    Response.json({ detail: { status: "voice_limit_reached" } }, {
+      status: 400,
+    })
+  );
+  const audio = new Blob([new Uint8Array(1024)], { type: "audio/mp4" });
+  await assert.rejects(
+    instance.clone({ name: "Мой", audio, type: "audio/mp4" }),
+    (error) => error.code === "elevenlabs_voice_slots_full",
+  );
+});

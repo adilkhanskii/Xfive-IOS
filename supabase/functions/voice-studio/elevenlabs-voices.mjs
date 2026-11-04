@@ -175,6 +175,13 @@ export class ElevenLabsVoicesClient {
     }
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
+      // слоты голосов аккаунта заняты (тариф ElevenLabs) — запись тут ни при чём
+      if (payload?.detail?.status === "voice_limit_reached") {
+        throw new ElevenLabsVoicesError(
+          "elevenlabs_voice_slots_full",
+          response.status,
+        );
+      }
       throw new ElevenLabsVoicesError("elevenlabs_rejected", response.status);
     }
     return payload;

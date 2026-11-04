@@ -59,7 +59,50 @@ export async function elevenLabsBalance(key, fetchImpl) {
     reset_at: Number.isFinite(reset) && reset > 0
       ? new Date(reset * 1000).toISOString()
       : null,
+    // слоты своих голосов и месячный лимит добавлений — «Свой голос» упирается в них
+    voices: {
+      used: numOrNull(payload?.voice_slots_used),
+      limit: numOrNull(payload?.voice_limit),
+      add_edits_used: numOrNull(payload?.voice_add_edit_counter),
+      add_edits_limit: numOrNull(payload?.max_voice_add_edits),
+      can_clone: typeof payload?.can_use_instant_voice_cloning === "boolean"
+        ? payload.can_use_instant_voice_cloning
+        : null,
+    },
   };
+}
+
+// Свои (не стандартные) голоса аккаунта — чтобы сверить слоты с user_voices. Только id/тип/имя.
+export async function elevenLabsOwnVoices(key, fetchImpl = fetch) {
+  const response = await fetchImpl("https://api.elevenlabs.io/v1/voices", {
+    headers: { "xi-api-key": key },
+  }).catch(() => null);
+  if (!response?.ok) return null;
+  const payload = await response.json().catch(() => null);
+  return (payload?.voices || [])
+    .filter((v) => v?.category && v.category !== "premade")
+    .map((v) => ({
+      id: String(v.voice_id || "").slice(0, 40),
+      category: String(v.category).slice(0, 20),
+      name: String(v.name || "").slice(0, 40),
+      created: Number(v.created_at_unix) || null,
+    }));
+}
+
+export function playServiceAccountEmail(raw) {
+  try {
+    const email = String(JSON.parse(String(raw || "")).client_email || "");
+    return /^[\w.-]+@[\w.-]+\.iam\.gserviceaccount\.com$/.test(email)
+      ? email
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function numOrNull(value) {
+  const n = Number(value);
+  return value != null && Number.isFinite(n) ? n : null;
 }
 
 /** role из JWT без проверки подписи — только как быстрый фильтр. @param {string} token */
@@ -116,6 +159,19 @@ export function createAIBalanceHandler(
       elevenlabs: await elevenLabsBalance(
         String(env("ELEVENLABS_API_KEY") || "").trim(),
         fetchImpl,
+      ),
+      // ?voices=1 — список своих голосов аккаунта (сверка слотов)
+      ...(new URL(req.url).searchParams.get("voices") === "1"
+        ? {
+          elevenlabs_voices: await elevenLabsOwnVoices(
+            String(env("ELEVENLABS_API_KEY") || "").trim(),
+            fetchImpl,
+          ),
+        }
+        : {}),
+      // email сервис-аккаунта Google Play (не секрет) — для выдачи прав в Play Console
+      google_play_service_account: playServiceAccountEmail(
+        env("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON"),
       ),
       // Для остальных — только «ключ стоит», остатка по API нет.
       configured: {
