@@ -281,6 +281,13 @@ final class CurrentUser: ObservableObject {
         }
     }
 
+    /// Владелец перевёл кредиты (с 04.11 сервер списывает их с его баланса) — счётчик сразу меньше.
+    func applyOwnerGrantDebit(_ amount: Int) {
+        guard var profile else { return }
+        profile.credits = max(0, (profile.credits ?? 0) - amount)
+        self.profile = profile
+    }
+
     func applyCreditsRemaining(_ credits: Int, for context: ProfileOperationContext?) {
         guard isCurrent(context), var profile, profile.id.lowercased() == context?.userID else { return }
         profile.credits = credits
