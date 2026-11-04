@@ -125,6 +125,7 @@ struct ProfileView: View {
                         return await OwnerCreditsService.grant(targetId: targetId, amount: amount, note: note, accessToken: token)
                     },
                     onGranted: { user, amount, balance in
+                        currentUser.applyOwnerGrantDebit(amount)
                         showOwnerCreditsToast(
                             loc.t("credits_ctl_done")
                                 .replacingOccurrences(of: "{n}", with: "\(amount)")

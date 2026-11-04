@@ -42,7 +42,7 @@ struct OwnerCreditsUser: Decodable, Identifiable, Equatable {
 /// owner_grant_credits / owner_search_users; сервер проверяет сам,
 /// здесь — чтобы ошибка была видна до запроса.
 enum OwnerCreditsError: String, Error, Equatable {
-    case amount, query, access, notFound = "not_found", search, grant
+    case amount, query, access, notFound = "not_found", search, grant, insufficient, selfGrant = "self"
 
     var localizationKey: String { "credits_ctl_err_\(rawValue)" }
 
@@ -64,6 +64,9 @@ enum OwnerCreditsError: String, Error, Equatable {
         let message = message ?? ""
         if code == "42501" || message.contains("developer_required") { return .access }
         if message.contains("invalid_amount") { return .amount }
+        // с 04.11 кредиты переводятся с баланса владельца (миграция 20261104090000)
+        if message.contains("insufficient_credits") { return .insufficient }
+        if message.contains("self_grant") { return .selfGrant }
         if message.contains("query_too_short") { return .query }
         if message.contains("profile_not_found") || message.contains("target_required") { return .notFound }
         return fallback
