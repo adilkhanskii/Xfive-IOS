@@ -89,6 +89,17 @@ export async function elevenLabsOwnVoices(key, fetchImpl = fetch) {
     }));
 }
 
+export function playServiceAccountEmail(raw) {
+  try {
+    const email = String(JSON.parse(String(raw || "")).client_email || "");
+    return /^[\w.-]+@[\w.-]+\.iam\.gserviceaccount\.com$/.test(email)
+      ? email
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function numOrNull(value) {
   const n = Number(value);
   return value != null && Number.isFinite(n) ? n : null;
@@ -158,6 +169,10 @@ export function createAIBalanceHandler(
           ),
         }
         : {}),
+      // email сервис-аккаунта Google Play (не секрет) — для выдачи прав в Play Console
+      google_play_service_account: playServiceAccountEmail(
+        env("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON"),
+      ),
       // Для остальных — только «ключ стоит», остатка по API нет.
       configured: {
         minimax: configured("MINIMAX_API_KEY"),
