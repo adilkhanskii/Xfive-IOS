@@ -73,10 +73,10 @@ class ReleaseVersionSourceTests(unittest.TestCase):
         # на проверке Apple остаётся 268 (очередь не теряем), поэтому ниже цель ревью — 268.
         # 01.11: TestFlight 270 (управление бонусом новым: пауза, подарок, лимит); ревью — 268.
         # 03.11: 1.1.20 (270) в продаже → 1.1.21 (271): Meta SDK (ATT) + начисление кредитов владельцем.
-        self.assertEqual(runtime_build_number, "271")
+        self.assertEqual(runtime_build_number, "272")
         self.assertEqual(fastlane_version, marketing_version)
         self.assertIn(
-            f"Version {marketing_version} build 271",
+            f"Version {marketing_version} build 272",
             review_notes,
         )
         self.assertIn(
@@ -84,7 +84,7 @@ class ReleaseVersionSourceTests(unittest.TestCase):
             submit_workflow,
         )
         self.assertIn(
-            'EXPECTED_BUILD: "271"',
+            'EXPECTED_BUILD: "272"',
             submit_workflow,
         )
         self.assertIn(
@@ -92,7 +92,7 @@ class ReleaseVersionSourceTests(unittest.TestCase):
             prepare_workflow,
         )
         self.assertIn(
-            'BUILD_NUMBER: "271"',
+            'BUILD_NUMBER: "272"',
             prepare_workflow,
         )
 

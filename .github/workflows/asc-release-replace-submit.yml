@@ -20,7 +20,7 @@ jobs:
       BUNDLE_ID: com.x5studio.app
       # 03.11: цель 1.1.21 (271) — Meta SDK + начисление кредитов владельцем; 01.11 21:50: 1.1.20 (270), замена 268; ранее 1.1.20 (268); 30.10 — 1.1.19 (267)
       EXPECTED_VERSION: "1.1.21"
-      EXPECTED_BUILD: "271"
+      EXPECTED_BUILD: "272"
       X5_RELEASE_TYPE: "AFTER_APPROVAL"
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
