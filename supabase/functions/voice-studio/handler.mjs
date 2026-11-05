@@ -156,13 +156,14 @@ async function clone(user, input, deps) {
 
   let created;
   try {
-    created = await client.clone({ name, audio: file, type });
+    // Мест у ElevenLabs нет — усыпляем давно не использованный голос X5.
+    created = await withRoom(deps, () => client.clone({ name, audio: file, type }));
   } catch (error) {
     // Тариф ElevenLabs не даёт клон (401/403) — это не «премиум скоро».
     if (error?.keyRejected) return cloneRequiresPlan();
     throw error;
   }
-  return await chargeOrRollback({
+  const response = await chargeOrRollback({
     user,
     key,
     kind: "clone",
@@ -177,6 +178,13 @@ async function clone(user, input, deps) {
       cost_credits: VOICE_STUDIO_PRICES.clone,
     }),
   });
+  // Запись голоса храним в X5 — из неё голос «просыпается» после сна.
+  // Не сохранилась — голос просто не будет засыпать (озвучка работает).
+  if (response.status === 200 && typeof deps.saveSample === "function") {
+    await deps.saveSample({ userID: user.id, voiceID: created.voiceID, file, type })
+      .catch(() => null);
+  }
+  return response;
 }
 
 async function design(user, input, deps) {
@@ -232,11 +240,13 @@ async function saveDesign(user, input, deps) {
   const blocked = await quoteBlock(user, VOICE_STUDIO_PRICES.save, true, deps);
   if (blocked) return blocked;
 
-  const created = await client.createFromPreview({
-    name,
-    description,
-    generatedVoiceID: generated,
-  });
+  const created = await withRoom(deps, () =>
+    client.createFromPreview({
+      name,
+      description,
+      generatedVoiceID: generated,
+    })
+  );
   return await chargeOrRollback({
     user,
     key,
@@ -262,14 +272,26 @@ async function deleteVoice(user, input, deps) {
   if (!owned) {
     return json(safeStudioError("not_found", "Voice not found."), 404);
   }
+  // Спящий голос у провайдера уже удалён; бодрствующий — по текущему id.
+  const state = typeof deps.voiceState === "function"
+    ? await deps.voiceState({ userID: user.id, voiceID })
+    : null;
+  const liveID = state ? (state.asleep ? null : state.live_voice_id) : voiceID;
   // Сначала у провайдера: если он недоступен, строка остаётся и удаление
   // можно повторить; голос не «потеряется» у ElevenLabs.
-  await client.deleteVoice(voiceID);
+  if (liveID) await client.deleteVoice(liveID);
   await deps.deleteVoiceRow({
     p_user_id: user.id,
     p_provider_voice_id: voiceID,
   });
+  if (state?.sample_path && typeof deps.removeSample === "function") {
+    await deps.removeSample(state.sample_path).catch(() => null);
+  }
   return json({ deleted: true, voice_id: voiceID });
+}
+
+function withRoom(deps, create) {
+  return typeof deps.withRoom === "function" ? deps.withRoom(create) : create();
 }
 
 async function quoteBlock(user, cost, needsSlot, deps) {

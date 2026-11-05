@@ -318,3 +318,69 @@ test("requires authentication", async () => {
   const response = await handler(jsonRequest({ action: "catalog" }));
   assert.equal(response.status, 401);
 });
+
+// «Голос спит» (05.11): запись сохраняется, места освобождает withRoom.
+test("clone keeps the recording in X5 and creates via withRoom", async () => {
+  const { calls, handler } = setup({
+    deps: {
+      withRoom: async (create) => {
+        calls.push(["with-room"]);
+        return await create();
+      },
+      saveSample: async ({ voiceID, type }) => {
+        calls.push(["sample", voiceID, type]);
+      },
+    },
+  });
+  const response = await handler(cloneRequest());
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls.filter((c) => ["with-room", "sample"].includes(c[0])), [
+    ["with-room"],
+    ["sample", "CloneVoice123", "audio/mp4"],
+  ]);
+});
+
+test("recording upload failure does not break a paid clone", async () => {
+  const { handler } = setup({
+    deps: { saveSample: async () => { throw new Error("storage down"); } },
+  });
+  assert.equal((await handler(cloneRequest())).status, 200);
+});
+
+test("delete of a sleeping voice skips the provider, removes row and recording", async () => {
+  const { calls, handler } = setup({
+    deps: {
+      voiceState: async () => ({
+        owned: true,
+        asleep: true,
+        live_voice_id: null,
+        sample_path: `${userID}/Mine12345.m4a`,
+      }),
+      removeSample: async (path) => calls.push(["sample-delete", path]),
+    },
+  });
+  const response = await handler(jsonRequest({ action: "delete", voice_id: "Mine12345" }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, [
+    ["row-delete", "Mine12345"],
+    ["sample-delete", `${userID}/Mine12345.m4a`],
+  ]);
+});
+
+test("delete of an awake re-cloned voice deletes its current provider id", async () => {
+  const { calls, handler } = setup({
+    deps: {
+      voiceState: async () => ({
+        owned: true,
+        asleep: false,
+        live_voice_id: "LiveNow98765",
+        sample_path: null,
+      }),
+    },
+  });
+  await handler(jsonRequest({ action: "delete", voice_id: "Mine12345" }));
+  assert.deepEqual(calls.slice(0, 2), [
+    ["provider-delete", "LiveNow98765"],
+    ["row-delete", "Mine12345"],
+  ]);
+});
