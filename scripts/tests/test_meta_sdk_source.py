@@ -69,10 +69,23 @@ class MetaSDKSourceTests(unittest.TestCase):
             re.compile(r"if applyResult\.isPurchaseSuccess \{\s*//[^\n]*\n\s*MetaAnalytics\.logPurchase"),
         )
 
-        content = (ROOT / "X5" / "ContentView.swift").read_text(encoding="utf-8")
-        self.assertIn("MetaAnalytics.requestTrackingAuthorizationIfNeeded()", content)
+        # Отказ Apple 5.1.2(i) 04.11: ATT — на первом экране при первом запуске,
+        # SDK стартует только после ответа, пуши ждут ATT.
         app = (ROOT / "X5" / "X5App.swift").read_text(encoding="utf-8")
-        self.assertNotIn("requestTrackingAuthorization", app, "no ATT prompt at cold launch")
+        self.assertIn(".task { await MetaAnalytics.requestTrackingOnLaunch() }", app)
+        content = (ROOT / "X5" / "ContentView.swift").read_text(encoding="utf-8")
+        self.assertNotIn("requestTracking", content, "single ATT entry point")
+        self.assertIn("await MetaAnalytics.waitForTrackingPrompt()", delegate)
+        start = meta[meta.index("static func start("):meta.index("private static func startSDK(")]
+        self.assertIn("trackingAuthorizationStatus == .notDetermined", start)
+        self.assertIn("pendingLaunchOptions = launchOptions", start)
+        prompt = meta[meta.index("static func requestTrackingOnLaunch()"):meta.index("static func waitForTrackingPrompt()")]
+        self.assertIn("applicationState != .active", prompt)
+        self.assertLess(
+            prompt.index("requestTrackingAuthorization()"),
+            prompt.index("startSDK("),
+            "SDK starts only after the ATT answer",
+        )
 
 
 if __name__ == "__main__":

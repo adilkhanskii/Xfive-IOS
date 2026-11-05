@@ -1,0 +1,76 @@
+name: iOS ATT prompt on fresh install
+
+# Отказ Apple 5.1.2(i) 04.11 (1.1.21/271): проверка чистой установкой на
+# симуляторе — окно ATT появляется само при первом запуске, до входа и пушей.
+# Тестовые Meta ID (не настоящие), без аккаунтов и данных пользователей.
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [fix/apple-reject-1121-272]
+    paths:
+      - "X5/**"
+      - "X5AcceptanceUITests/**"
+      - ".github/workflows/ios-att-fresh-install.yml"
+
+jobs:
+  att:
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Select Xcode and install pinned XcodeGen
+        shell: bash
+        run: |
+          set -euo pipefail
+          X=/Applications/Xcode_26.app; [ -d "$X" ] || X=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n 1 || true); sudo xcode-select -s "${X:-/Applications/Xcode.app}"
+          xcodebuild -version
+          curl --proto '=https' --tlsv1.2 -fsSL 'https://github.com/yonaskolb/XcodeGen/releases/download/2.45.4/xcodegen.zip' --output "$RUNNER_TEMP/xcodegen.zip"
+          echo '090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef  '"$RUNNER_TEMP/xcodegen.zip" | shasum -a 256 -c -
+          mkdir -p "$RUNNER_TEMP/xcodegen"
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP/xcodegen"
+          echo "$RUNNER_TEMP/xcodegen/xcodegen/bin" >> "$GITHUB_PATH"
+      - name: Generate project
+        run: xcodegen generate
+      - name: Fresh iPhone simulator (erased)
+        id: simulator
+        shell: bash
+        run: |
+          DEVICE_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for a in d["devices"].values() for x in a if x.get("isAvailable") and x.get("name", "").startswith("iPhone 17")) if any(x.get("name","").startswith("iPhone 17") for a in d["devices"].values() for x in a) else next(x["udid"] for a in d["devices"].values() for x in a if x.get("isAvailable") and x.get("name", "").startswith("iPhone")))')
+          xcrun simctl shutdown "$DEVICE_ID" || true
+          xcrun simctl erase "$DEVICE_ID"
+          xcrun simctl list devices | grep "$DEVICE_ID"
+          echo "id=$DEVICE_ID" >> "$GITHUB_OUTPUT"
+      - name: Fresh install → ATT prompt test
+        shell: bash
+        env:
+          TEST_RUNNER_X5_EXPECT_ATT: "1"
+        run: |
+          set -o pipefail
+          xcodebuild test -project X5.xcodeproj -scheme X5-Acceptance-CI \
+            -configuration Debug \
+            -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.id }}' \
+            -only-testing:X5AcceptanceUITests/TrackingPromptFreshInstallTests \
+            -resultBundlePath "$RUNNER_TEMP/att.xcresult" \
+            FACEBOOK_APP_ID=1234567890 FACEBOOK_CLIENT_TOKEN=ci-test-token \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=YES \
+            COMPILER_INDEX_STORE_ENABLE=NO
+      - name: Export screenshots
+        if: always()
+        shell: bash
+        run: |
+          if [ -d "$RUNNER_TEMP/att.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/att.xcresult" --output-path "$RUNNER_TEMP/att-screens"
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: att-fresh-install-screens
+          path: ${{ runner.temp }}/att-screens/**
+          if-no-files-found: warn
+          retention-days: 7

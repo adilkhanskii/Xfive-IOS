@@ -49,6 +49,8 @@ final class PushNotifications: NSObject, ObservableObject {
     /// Call after sign-in. Asks permission and registers with APNs.
     func bootstrap() {
         Task {
+            // Сначала ответ на ATT: два системных окна сразу — iOS не покажет ATT.
+            await MetaAnalytics.waitForTrackingPrompt()
             do {
                 let granted = try await UNUserNotificationCenter.current()
                     .requestAuthorization(options: [.alert, .sound, .badge])
