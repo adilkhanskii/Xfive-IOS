@@ -10,8 +10,8 @@ import { createVoiceStudioHandler } from "./handler.mjs";
 import {
   captureVoiceSample,
   createVoiceSleeper,
-  VoiceSampleStorage,
   voiceSamplePath,
+  VoiceSampleStorage,
 } from "../_shared/voice-sleep.mjs";
 
 const supabaseURL = requiredEnvironment("SUPABASE_URL");
@@ -26,7 +26,8 @@ const samples = new VoiceSampleStorage({ supabaseURL, serviceRoleKey });
 // «Голос спит»: места у ElevenLabs освобождаем усыплением старых голосов X5.
 const sleeper = voices
   ? createVoiceSleeper({
-    rpc: (name: string, params: Record<string, unknown>) => backend.rpc(name, params),
+    rpc: (name: string, params: Record<string, unknown>) =>
+      backend.rpc(name, params),
     voices,
     storage: samples,
     capture: (voiceID: string) =>

@@ -41,7 +41,9 @@ function world({ slots = 2, voices = [] } = {}) {
       case "user_voice_sleep_candidates":
         return {
           voices: [...rows.values()]
-            .filter((x) => !x.asleep && x.id !== p.p_exclude && x.used !== Infinity)
+            .filter((x) =>
+              !x.asleep && x.id !== p.p_exclude && x.used !== Infinity
+            )
             .sort((a, b) => (a.used || 0) - (b.used || 0))
             .map((x) => ({
               id: x.id,
@@ -59,7 +61,9 @@ function world({ slots = 2, voices = [] } = {}) {
         return { status: "asleep" };
       case "mark_user_voice_awake":
         if (!r) return { status: "not_found" };
-        if (!r.asleep) return { status: "already_awake", live_voice_id: live(r) };
+        if (!r.asleep) {
+          return { status: "already_awake", live_voice_id: live(r) };
+        }
         r.asleep = false;
         r.live = p.p_live_voice_id;
         return { status: "awake", live_voice_id: r.live };
@@ -96,7 +100,9 @@ function world({ slots = 2, voices = [] } = {}) {
       stored.delete(path);
     },
   };
-  for (const v of voices) if (v.sample) stored.set(v.sample, new Uint8Array(40000));
+  for (const v of voices) {
+    if (v.sample) stored.set(v.sample, new Uint8Array(40000));
+  }
   const captured = [];
   const sleeper = createVoiceSleeper({
     rpc,
@@ -111,7 +117,9 @@ function world({ slots = 2, voices = [] } = {}) {
 }
 
 test("awake voice: returns current id, no provider calls", async () => {
-  const w = world({ voices: [{ id: "VoiceAAAA1", sample: `${USER}/VoiceAAAA1.m4a` }] });
+  const w = world({
+    voices: [{ id: "VoiceAAAA1", sample: `${USER}/VoiceAAAA1.m4a` }],
+  });
   assert.equal(await w.sleeper.ensureAwake(USER, "VoiceAAAA1"), "VoiceAAAA1");
   assert.deepEqual([...w.provider], ["VoiceAAAA1"]);
 });
@@ -127,7 +135,11 @@ test("foreign voice is refused", async () => {
 test("asleep voice wakes from its sample when there is room", async () => {
   const w = world({
     slots: 2,
-    voices: [{ id: "VoiceAAAA1", asleep: true, sample: `${USER}/VoiceAAAA1.m4a` }],
+    voices: [{
+      id: "VoiceAAAA1",
+      asleep: true,
+      sample: `${USER}/VoiceAAAA1.m4a`,
+    }],
   });
   const live = await w.sleeper.ensureAwake(USER, "VoiceAAAA1");
   assert.equal(live, "NewVoice0001");
@@ -173,7 +185,11 @@ test("old voice without a sample is recorded before it sleeps", async () => {
 test("nothing to evict: slots-full error goes up (caller refunds)", async () => {
   const w = world({
     slots: 1,
-    voices: [{ id: "VoiceWant3", asleep: true, sample: `${USER}/VoiceWant3.m4a` }],
+    voices: [{
+      id: "VoiceWant3",
+      asleep: true,
+      sample: `${USER}/VoiceWant3.m4a`,
+    }],
   });
   w.provider.add("ForeignAccountVoice");
   await assert.rejects(
@@ -186,7 +202,11 @@ test("nothing to evict: slots-full error goes up (caller refunds)", async () => 
 test("parallel wake: the extra clone is deleted, existing id is used", async () => {
   const w = world({
     slots: 5,
-    voices: [{ id: "VoiceWant3", asleep: true, sample: `${USER}/VoiceWant3.m4a` }],
+    voices: [{
+      id: "VoiceWant3",
+      asleep: true,
+      sample: `${USER}/VoiceWant3.m4a`,
+    }],
   });
   const original = w.client.clone.bind(w.client);
   w.client.clone = async (args) => {
@@ -222,7 +242,10 @@ test("provider refuses delete: voice is marked awake again", async () => {
 
 test("sample path and type helpers match the DB check", () => {
   const path = voiceSamplePath(USER, "VoiceAAAA1", "audio/x-m4a");
-  assert.match(path, /^[0-9a-f-]{36}\/[A-Za-z0-9]{8,40}\.(mp3|m4a|wav|webm|ogg)$/);
+  assert.match(
+    path,
+    /^[0-9a-f-]{36}\/[A-Za-z0-9]{8,40}\.(mp3|m4a|wav|webm|ogg)$/,
+  );
   assert.equal(sampleType(path), "audio/mp4");
   assert.equal(sampleType(`${USER}/x.webm`), "audio/webm");
 });

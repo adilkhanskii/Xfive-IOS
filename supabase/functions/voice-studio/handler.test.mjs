@@ -334,15 +334,22 @@ test("clone keeps the recording in X5 and creates via withRoom", async () => {
   });
   const response = await handler(cloneRequest());
   assert.equal(response.status, 200);
-  assert.deepEqual(calls.filter((c) => ["with-room", "sample"].includes(c[0])), [
-    ["with-room"],
-    ["sample", "CloneVoice123", "audio/mp4"],
-  ]);
+  assert.deepEqual(
+    calls.filter((c) => ["with-room", "sample"].includes(c[0])),
+    [
+      ["with-room"],
+      ["sample", "CloneVoice123", "audio/mp4"],
+    ],
+  );
 });
 
 test("recording upload failure does not break a paid clone", async () => {
   const { handler } = setup({
-    deps: { saveSample: async () => { throw new Error("storage down"); } },
+    deps: {
+      saveSample: async () => {
+        throw new Error("storage down");
+      },
+    },
   });
   assert.equal((await handler(cloneRequest())).status, 200);
 });
@@ -359,7 +366,9 @@ test("delete of a sleeping voice skips the provider, removes row and recording",
       removeSample: async (path) => calls.push(["sample-delete", path]),
     },
   });
-  const response = await handler(jsonRequest({ action: "delete", voice_id: "Mine12345" }));
+  const response = await handler(
+    jsonRequest({ action: "delete", voice_id: "Mine12345" }),
+  );
   assert.equal(response.status, 200);
   assert.deepEqual(calls, [
     ["row-delete", "Mine12345"],

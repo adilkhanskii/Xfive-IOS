@@ -42,7 +42,8 @@ const premiumProvider = elevenLabsKey.trim()
 // «Голос спит»: свой голос будим из записи X5 прямо перед озвучкой.
 const sleeper = elevenLabsKey.trim()
   ? createVoiceSleeper({
-    rpc: (name: string, params: Record<string, unknown>) => backend.rpc(name, params),
+    rpc: (name: string, params: Record<string, unknown>) =>
+      backend.rpc(name, params),
     voices: new ElevenLabsVoicesClient({ apiKey: elevenLabsKey }),
     storage: new VoiceSampleStorage({ supabaseURL, serviceRoleKey }),
     capture: (voiceID: string) =>
@@ -54,7 +55,9 @@ const isPremium = (tier: unknown) => tier === "premium";
 
 // Постоянный id своего голоса → текущий id у ElevenLabs (спит — будим).
 // Не вышло разбудить — обычный отказ провайдера: кредиты вернутся.
-async function liveVoiceInput(input: Record<string, unknown>) {
+async function liveVoiceInput(
+  input: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
   const voice = String(input.voice || "");
   const userID = String(input.userID || "");
   if (!isPremium(input.tier) || !sleeper || !userID || isPremadeVoice(voice)) {

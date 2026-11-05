@@ -56,7 +56,9 @@ export function sampleType(path) {
 /** Хранилище записей через Storage REST с ключом service_role. */
 export class VoiceSampleStorage {
   constructor({ supabaseURL, serviceRoleKey, fetchImpl = fetch }) {
-    this.root = `${String(supabaseURL || "").replace(/\/+$/, "")}/storage/v1/object`;
+    this.root = `${
+      String(supabaseURL || "").replace(/\/+$/, "")
+    }/storage/v1/object`;
     this.key = String(serviceRoleKey || "").trim();
     this.fetchImpl = fetchImpl;
   }
@@ -91,19 +93,26 @@ export class VoiceSampleStorage {
   }
 
   async remove(path) {
-    const response = await this.fetchImpl(`${this.root}/${VOICE_SAMPLE_BUCKET}`, {
-      method: "DELETE",
-      headers: this.#headers({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ prefixes: [path] }),
-    });
+    const response = await this.fetchImpl(
+      `${this.root}/${VOICE_SAMPLE_BUCKET}`,
+      {
+        method: "DELETE",
+        headers: this.#headers({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ prefixes: [path] }),
+      },
+    );
     await response.body?.cancel().catch(() => null);
   }
 }
 
 /** Озвучка текста голосом — для записи старых голосов перед первым сном. */
-export async function captureVoiceSample({ apiKey, voiceID, fetchImpl = fetch }) {
+export async function captureVoiceSample(
+  { apiKey, voiceID, fetchImpl = fetch },
+) {
   const url = new URL(
-    `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceID)}`,
+    `https://api.elevenlabs.io/v1/text-to-speech/${
+      encodeURIComponent(voiceID)
+    }`,
   );
   url.searchParams.set("output_format", "mp3_44100_128");
   const response = await fetchImpl(url, {
@@ -113,7 +122,10 @@ export async function captureVoiceSample({ apiKey, voiceID, fetchImpl = fetch })
       "Content-Type": "application/json",
       Accept: "audio/mpeg",
     },
-    body: JSON.stringify({ text: SAMPLE_CAPTURE_TEXT, model_id: CAPTURE_MODEL }),
+    body: JSON.stringify({
+      text: SAMPLE_CAPTURE_TEXT,
+      model_id: CAPTURE_MODEL,
+    }),
     signal: AbortSignal.timeout(90_000),
   });
   if (!response.ok) {
@@ -121,7 +133,9 @@ export async function captureVoiceSample({ apiKey, voiceID, fetchImpl = fetch })
     throw new VoiceSleepError("sample_capture_failed");
   }
   const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.byteLength < 32 * 1024) throw new VoiceSleepError("sample_capture_short");
+  if (bytes.byteLength < 32 * 1024) {
+    throw new VoiceSleepError("sample_capture_short");
+  }
   return bytes;
 }
 
@@ -140,14 +154,22 @@ export function createVoiceSleeper(deps) {
       // Старый голос без записи: сначала сохраняем его звучание.
       try {
         const bytes = await deps.capture(candidate.live_voice_id);
-        samplePath = voiceSamplePath(candidate.user_id, candidate.id, "audio/mpeg");
+        samplePath = voiceSamplePath(
+          candidate.user_id,
+          candidate.id,
+          "audio/mpeg",
+        );
         await deps.storage.upload(samplePath, bytes, "audio/mpeg");
         await deps.rpc("set_user_voice_sample", {
           p_provider_voice_id: candidate.id,
           p_sample_path: samplePath,
         });
       } catch (error) {
-        log("voice-sleep: capture failed", candidate.id, error?.code || error?.message);
+        log(
+          "voice-sleep: capture failed",
+          candidate.id,
+          error?.code || error?.message,
+        );
         return false;
       }
     }
@@ -184,11 +206,14 @@ export function createVoiceSleeper(deps) {
 
   /** Создать голос у провайдера; мест нет — усыпить давно не использованный и повторить. */
   async function withRoom(create, excludeID) {
-    for (let attempt = 0; ; attempt += 1) {
+    for (let attempt = 0;; attempt += 1) {
       try {
         return await create();
       } catch (error) {
-        if (error?.code !== "elevenlabs_voice_slots_full" || attempt >= MAX_EVICTIONS) {
+        if (
+          error?.code !== "elevenlabs_voice_slots_full" ||
+          attempt >= MAX_EVICTIONS
+        ) {
           throw error;
         }
         if (!(await freeOneSlot(excludeID))) throw error;
@@ -205,7 +230,9 @@ export function createVoiceSleeper(deps) {
     if (state?.owned !== true) throw new VoiceSleepError("voice_not_owned");
     await deps.rpc("touch_user_voice", { p_provider_voice_id: voiceID })
       .catch(() => null);
-    if (state.asleep !== true && state.live_voice_id) return state.live_voice_id;
+    if (state.asleep !== true && state.live_voice_id) {
+      return state.live_voice_id;
+    }
 
     const bytes = await deps.storage.download(state.sample_path);
     const type = sampleType(state.sample_path);

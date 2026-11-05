@@ -157,7 +157,10 @@ async function clone(user, input, deps) {
   let created;
   try {
     // Мест у ElevenLabs нет — усыпляем давно не использованный голос X5.
-    created = await withRoom(deps, () => client.clone({ name, audio: file, type }));
+    created = await withRoom(
+      deps,
+      () => client.clone({ name, audio: file, type }),
+    );
   } catch (error) {
     // Тариф ElevenLabs не даёт клон (401/403) — это не «премиум скоро».
     if (error?.keyRejected) return cloneRequiresPlan();
@@ -181,7 +184,12 @@ async function clone(user, input, deps) {
   // Запись голоса храним в X5 — из неё голос «просыпается» после сна.
   // Не сохранилась — голос просто не будет засыпать (озвучка работает).
   if (response.status === 200 && typeof deps.saveSample === "function") {
-    await deps.saveSample({ userID: user.id, voiceID: created.voiceID, file, type })
+    await deps.saveSample({
+      userID: user.id,
+      voiceID: created.voiceID,
+      file,
+      type,
+    })
       .catch(() => null);
   }
   return response;
@@ -245,8 +253,7 @@ async function saveDesign(user, input, deps) {
       name,
       description,
       generatedVoiceID: generated,
-    })
-  );
+    }));
   return await chargeOrRollback({
     user,
     key,
