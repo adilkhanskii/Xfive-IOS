@@ -20,6 +20,8 @@ jobs:
   att:
     runs-on: macos-26
     timeout-minutes: 40
+    env:
+      ATT_LANG: ru
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -51,12 +53,20 @@ jobs:
           DEVICE_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for a in d["devices"].values() for x in a if x.get("isAvailable") and x.get("name", "").startswith("iPhone 17")) if any(x.get("name","").startswith("iPhone 17") for a in d["devices"].values() for x in a) else next(x["udid"] for a in d["devices"].values() for x in a if x.get("isAvailable") and x.get("name", "").startswith("iPhone")))')
           xcrun simctl shutdown "$DEVICE_ID" || true
           xcrun simctl erase "$DEVICE_ID"
+          if [ "${ATT_LANG:-en}" = "ru" ]; then
+            # Системный язык симулятора — русский (заголовок окна ATT рисует iOS).
+            xcrun simctl boot "$DEVICE_ID"
+            xcrun simctl spawn "$DEVICE_ID" defaults write -g AppleLanguages -array ru
+            xcrun simctl spawn "$DEVICE_ID" defaults write -g AppleLocale -string ru_RU
+            xcrun simctl shutdown "$DEVICE_ID"
+          fi
           xcrun simctl list devices | grep "$DEVICE_ID"
           echo "id=$DEVICE_ID" >> "$GITHUB_OUTPUT"
       - name: Fresh install → ATT prompt test
         shell: bash
         env:
           TEST_RUNNER_X5_EXPECT_ATT: "1"
+          TEST_RUNNER_X5_ATT_LANG: ${{ env.ATT_LANG }}
         run: |
           set -o pipefail
           xcodebuild test -project X5.xcodeproj -scheme X5-Acceptance-CI \

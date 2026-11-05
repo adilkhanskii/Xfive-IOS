@@ -11,14 +11,19 @@ final class TrackingPromptFreshInstallTests: XCTestCase {
         }
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US", "-x5.language", "en"]
+        // X5_ATT_LANG=ru — проверка русского текста окна (Адильхан 05.11).
+        let ru = ProcessInfo.processInfo.environment["X5_ATT_LANG"] == "ru"
+        app.launchArguments = ru
+            ? ["-AppleLanguages", "(ru)", "-AppleLocale", "ru_RU", "-x5.language", "ru"]
+            : ["-AppleLanguages", "(en)", "-AppleLocale", "en_US", "-x5.language", "en"]
         app.launch()
 
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let alert = springboard.alerts.firstMatch
         XCTAssertTrue(alert.waitForExistence(timeout: 20), "ATT prompt did not appear on first launch")
         let title = alert.label.lowercased()
-        XCTAssertTrue(title.contains("track"), "first system alert is not ATT: \(alert.label)")
+        XCTAssertTrue(title.contains("track") || title.contains("отслежива"),
+                      "first system alert is not ATT: \(alert.label)")
 
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = "01-att-prompt-first-launch"
@@ -26,7 +31,7 @@ final class TrackingPromptFreshInstallTests: XCTestCase {
         add(shot)
 
         // Ответ пользователя — любой; дальше приложение работает как обычно.
-        let deny = alert.buttons["Ask App Not to Track"]
+        let deny = alert.buttons.element(boundBy: 0)
         XCTAssertTrue(deny.exists, "ATT buttons missing")
         deny.tap()
 
