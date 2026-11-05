@@ -57,6 +57,9 @@ struct X5App: App {
                     // fb<AppID>:// и параметры клика по рекламе (AEM).
                     MetaAnalytics.handle(url)
                 }
+                // ATT — первым системным окном при первом запуске (до входа,
+                // до пушей, до старта Meta SDK). Отказ Apple 5.1.2(i) 04.11.
+                .task { await MetaAnalytics.requestTrackingOnLaunch() }
                 .task(id: auth.isAuthenticated) {
                     DiagnosticLogger.log(event: "auth_state",
                                          extra: ["authenticated": auth.isAuthenticated ? "true" : "false"])

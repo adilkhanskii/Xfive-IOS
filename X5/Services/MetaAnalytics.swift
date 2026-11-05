@@ -32,11 +32,33 @@ enum MetaAnalytics {
 
     static var isConfigured: Bool { configuredAppID() != nil }
 
+    private static var pendingLaunchOptions: [UIApplication.LaunchOptionsKey: Any]?
+    private static var trackingResolved = false
+    private static var trackingWaiters: [CheckedContinuation<Void, Never>] = []
+
     /// Из `application(_:didFinishLaunchingWithOptions:)`.
-    /// Событие запуска (fb_mobile_activate_app) SDK пишет сам при каждой
-    /// активации — `FacebookAutoLogAppEventsEnabled` = true в Info.plist,
-    /// поэтому отдельный `activateApp()` не зовём (иначе запуск задвоится).
+    /// Отказ Apple 5.1.2(i) 04.11 (1.1.21/271): проверяющий не увидел окно ATT —
+    /// оно спрашивалось только после входа и одновременно с запросом пушей
+    /// (iOS не показывает ATT поверх другого системного окна), а SDK стартовал
+    /// ещё до ответа. Теперь: ответ на ATT уже есть → SDK сразу; нет ответа →
+    /// SDK ждёт окна ATT на первом экране (requestTrackingOnLaunch).
+    /// Событие запуска (fb_mobile_activate_app) SDK пишет сам —
+    /// `FacebookAutoLogAppEventsEnabled` = true, отдельный `activateApp()` не зовём.
     static func start(
+        _ application: UIApplication,
+        launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+    ) {
+        guard isConfigured, !started else { return }
+        if ATTrackingManager.trackingAuthorizationStatus == .notDetermined,
+           !UserDefaults.standard.bool(forKey: skipTrackingPromptKey) {
+            pendingLaunchOptions = launchOptions
+            return
+        }
+        resolveTracking()
+        startSDK(application, launchOptions: launchOptions)
+    }
+
+    private static func startSDK(
         _ application: UIApplication,
         launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) {
@@ -59,18 +81,45 @@ enum MetaAnalytics {
         )
     }
 
-    /// Системный запрос ATT. Только на главном экране после входа, не на
-    /// холодном старте (Apple отклоняет запрос до интерфейса). Один раз:
-    /// после ответа система больше не спрашивает.
+    /// Системный запрос ATT — при первом запуске, на первом экране (до входа),
+    /// раньше запроса пушей и до старта Meta SDK. Ждём, пока приложение
+    /// станет активным (Face ID / системные окна делают его неактивным —
+    /// тогда iOS молча не показывает ATT). Один раз: после ответа система
+    /// больше не спрашивает.
     @MainActor
-    static func requestTrackingAuthorizationIfNeeded() async {
-        guard started,
-              !UserDefaults.standard.bool(forKey: skipTrackingPromptKey),
-              ATTrackingManager.trackingAuthorizationStatus == .notDetermined,
-              UIApplication.shared.applicationState == .active
+    static func requestTrackingOnLaunch() async {
+        defer { resolveTracking() }
+        guard isConfigured,
+              !UserDefaults.standard.bool(forKey: skipTrackingPromptKey)
         else { return }
-        _ = await ATTrackingManager.requestTrackingAuthorization()
-        syncAdvertiserTracking()
+        if ATTrackingManager.trackingAuthorizationStatus == .notDetermined {
+            // Первый кадр интерфейса уже на экране — запрос не на «пустом» старте.
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            for _ in 0..<40 where UIApplication.shared.applicationState != .active {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+            if ATTrackingManager.trackingAuthorizationStatus == .notDetermined {
+                _ = await ATTrackingManager.requestTrackingAuthorization()
+            }
+        }
+        startSDK(UIApplication.shared, launchOptions: pendingLaunchOptions)
+        pendingLaunchOptions = nil
+    }
+
+    /// Запрос пушей ждёт ответа на ATT, чтобы два системных окна не налезли
+    /// друг на друга (иначе iOS не покажет ATT).
+    @MainActor
+    static func waitForTrackingPrompt() async {
+        guard isConfigured, !trackingResolved else { return }
+        await withCheckedContinuation { trackingWaiters.append($0) }
+    }
+
+    private static func resolveTracking() {
+        guard !trackingResolved else { return }
+        trackingResolved = true
+        let waiters = trackingWaiters
+        trackingWaiters = []
+        waiters.forEach { $0.resume() }
     }
 
     /// iOS 16: SDK берёт флаг отсюда; на iOS 17+ сам читает статус ATT.

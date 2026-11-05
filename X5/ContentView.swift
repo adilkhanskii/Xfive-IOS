@@ -30,14 +30,6 @@ struct ContentView: View {
                     OnboardingView()
                 } else {
                     AppTabView()
-                        // ATT — только на главном экране, не поверх Face ID и
-                        // не на холодном старте (требование Apple и Meta AEM).
-                        .task(id: isLocked) {
-                            guard !isLocked else { return }
-                            try? await Task.sleep(nanoseconds: 1_500_000_000)
-                            guard !Task.isCancelled, !isLocked else { return }
-                            await MetaAnalytics.requestTrackingAuthorizationIfNeeded()
-                        }
                 }
             }
             .animation(.easeInOut(duration: 0.2), value: auth.isAuthenticated)

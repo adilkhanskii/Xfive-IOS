@@ -1,4 +1,4 @@
-Xfive marketing. Version 1.1.21 build 271.
+Xfive marketing. Version 1.1.21 build 272.
 New in 1.1.21: the app owner (admin only, checked by the server) can grant
 credits to an account found by email, nickname or name; every grant is logged.
 The app now includes the Meta (Facebook) SDK for ad attribution and app events
@@ -30,12 +30,19 @@ has a capped isolated Sandbox allowance to exercise the purchase flow.
 Ordinary TestFlight accounts cannot receive spendable credits from Sandbox.
 Production purchases require Apple's signed transaction verification.
 
-App Tracking Transparency: the app now includes the Meta (Facebook) SDK to
-measure installs, launches, registrations and purchases from our ads. The ATT
-prompt is shown once, on the main screen after sign-in (never at launch). If
-the user declines, no IDFA is collected; Meta then measures only through
-Aggregated Event Measurement and SKAdNetwork. No email, name or phone number
-is sent to Meta. App Privacy is updated accordingly.
+App Tracking Transparency (fix for the 5.1.2(i) review of build 271): the app
+uses the Meta (Facebook) SDK to measure installs, launches, registrations and
+purchases from our ads. Where the request is: on a fresh install the system
+"Allow Xfive marketing to track your activity..." prompt appears about one
+second after the first screen (the sign-in screen) opens, before sign-in
+and before the notification permission prompt. The Meta SDK is not started and
+collects nothing until the user answers. In build 271 the prompt was shown only
+after sign-in, at the same moment as the notification prompt, so iOS did not
+display it; this is fixed in build 272. To see it again: delete the app and
+install it fresh, with Settings > Privacy & Security > Tracking > "Allow Apps
+to Request to Track" turned on. If the user declines, no IDFA is collected; Meta
+then measures only through Aggregated Event Measurement and SKAdNetwork. No
+email, name or phone number is sent to Meta.
 
 Mainland China remains excluded from availability. Other privacy disclosures,
 AI capabilities, account deletion and portfolio moderation are unchanged.
