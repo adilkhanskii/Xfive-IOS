@@ -3,8 +3,8 @@ const MODERATION_MODEL = "omni-moderation-latest";
 const GOOGLE_GENERATE_CONTENT_ROOT =
   "https://generativelanguage.googleapis.com/v1beta/models";
 const GOOGLE_MODERATION_MODELS = Object.freeze([
+  "gemini-3.5-flash-lite",
   "gemini-2.5-flash-lite",
-  "gemini-2.0-flash-lite",
 ]);
 const GOOGLE_BLOCKED_FINISH_REASONS = new Set([
   "SAFETY",
