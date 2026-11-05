@@ -35,6 +35,13 @@ jobs:
           mkdir -p "$RUNNER_TEMP/xcodegen"
           unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP/xcodegen"
           echo "$RUNNER_TEMP/xcodegen/xcodegen/bin" >> "$GITHUB_PATH"
+      # Цель UI-тестов ссылается на файлы логина проверяющего; этому тесту вход
+      # не нужен — пустые заглушки, без секретов.
+      - name: Empty review-login placeholders
+        run: |
+          mkdir -p .secrets/review-test
+          : > .secrets/review-test/demo_user.txt
+          : > .secrets/review-test/demo_password.txt
       - name: Generate project
         run: xcodegen generate
       - name: Fresh iPhone simulator (erased)
