@@ -11,6 +11,14 @@ import { FalVoiceQueueProvider } from "./fal-provider.mjs";
 import { DirectVoiceProvider } from "./direct-provider.mjs";
 import { ElevenLabsVoiceProvider } from "./elevenlabs-provider.mjs";
 import { createGenerateVoiceHandler } from "./handler.mjs";
+import { isPremadeVoice } from "./contract.mjs";
+import { ElevenLabsVoicesClient } from "../voice-studio/elevenlabs-voices.mjs";
+import {
+  captureVoiceSample,
+  createVoiceSleeper,
+  VoiceSampleStorage,
+} from "../_shared/voice-sleep.mjs";
+import { ElevenLabsVoiceProviderError } from "./elevenlabs-provider.mjs";
 
 const supabaseURL = requiredEnvironment("SUPABASE_URL");
 const anonKey = requiredEnvironment("SUPABASE_ANON_KEY");
@@ -31,7 +39,37 @@ const directProvider = minimaxKey.trim()
 const premiumProvider = elevenLabsKey.trim()
   ? new ElevenLabsVoiceProvider({ apiKey: elevenLabsKey })
   : null;
+// «Голос спит»: свой голос будим из записи X5 прямо перед озвучкой.
+const sleeper = elevenLabsKey.trim()
+  ? createVoiceSleeper({
+    rpc: (name: string, params: Record<string, unknown>) =>
+      backend.rpc(name, params),
+    voices: new ElevenLabsVoicesClient({ apiKey: elevenLabsKey }),
+    storage: new VoiceSampleStorage({ supabaseURL, serviceRoleKey }),
+    capture: (voiceID: string) =>
+      captureVoiceSample({ apiKey: elevenLabsKey, voiceID }),
+    log: (...parts: unknown[]) => console.log(...parts),
+  })
+  : null;
 const isPremium = (tier: unknown) => tier === "premium";
+
+// Постоянный id своего голоса → текущий id у ElevenLabs (спит — будим).
+// Не вышло разбудить — обычный отказ провайдера: кредиты вернутся.
+async function liveVoiceInput(
+  input: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const voice = String(input.voice || "");
+  const userID = String(input.userID || "");
+  if (!isPremium(input.tier) || !sleeper || !userID || isPremadeVoice(voice)) {
+    return input;
+  }
+  try {
+    return { ...input, voice: await sleeper.ensureAwake(userID, voice) };
+  } catch (error) {
+    console.warn("generate-voice: wake failed", (error as Error)?.message);
+    throw new ElevenLabsVoiceProviderError("elevenlabs_rejected");
+  }
+}
 const providerForTier = (tier: unknown) =>
   isPremium(tier) ? premiumProvider : directProvider;
 
@@ -39,8 +77,16 @@ Deno.serve(createGenerateVoiceHandler({
   verifyUser,
   providerConfigured: (tier?: string) => providerForTier(tier) !== null,
   directProviderConfigured: (tier?: string) => providerForTier(tier) !== null,
-  generateDirect: (parameters: { input: Record<string, unknown> }) =>
-    providerForTier(parameters.input.tier)!.generate(parameters),
+  generateDirect: async (
+    parameters: { input: Record<string, unknown>; userID?: string },
+  ) => {
+    const input = await liveVoiceInput({
+      ...parameters.input,
+      userID: parameters.userID,
+    });
+    delete input.userID;
+    return providerForTier(input.tier)!.generate({ input });
+  },
   ownsVoice: async (
     { userID, voiceID }: { userID: string; voiceID: string },
   ) => {

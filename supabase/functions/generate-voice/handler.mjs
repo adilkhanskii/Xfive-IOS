@@ -451,7 +451,11 @@ export async function finalizeProviderResult({
 async function runDirectGeneration({ normalized, ledger, deps }) {
   let generated;
   try {
-    generated = await deps.generateDirect({ input: normalized });
+    // userID — для своего голоса: спящий будим под этого владельца.
+    generated = await deps.generateDirect({
+      input: normalized,
+      userID: ledger.userID,
+    });
   } catch (error) {
     if (error?.submissionAmbiguous === true) {
       if (!ledger.providerRequestID && ledger.claimToken) {
