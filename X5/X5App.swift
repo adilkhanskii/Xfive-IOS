@@ -98,6 +98,9 @@ struct X5App: App {
         #if DEBUG
         if ProcessInfo.processInfo.environment["X5_HOME_QA_PREVIEW"] == "1" {
             AppTabView()
+        } else if ProcessInfo.processInfo.environment["X5_CREATE_TASK_QA_PREVIEW"] == "1" {
+            // Скрин формы «Новое задание» в симуляторе, без входа и сети.
+            CreateTaskView()
         } else {
             ContentView()
         }
