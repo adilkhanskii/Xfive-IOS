@@ -54,6 +54,13 @@ jobs:
           # Ровная строка состояния для скрина: время как у мок-сообщений, полный сигнал.
           xcrun simctl boot "$DEVICE_ID"
           xcrun simctl bootstatus "$DEVICE_ID" -b
+          # Системный язык ru и 24-часовой формат — время в строке состояния как в пузырях.
+          xcrun simctl spawn "$DEVICE_ID" defaults write -g AppleLanguages -array ru
+          xcrun simctl spawn "$DEVICE_ID" defaults write -g AppleLocale ru_KZ
+          xcrun simctl spawn "$DEVICE_ID" defaults write -g AppleICUForce24HourTime -bool YES
+          xcrun simctl shutdown "$DEVICE_ID"
+          xcrun simctl boot "$DEVICE_ID"
+          xcrun simctl bootstatus "$DEVICE_ID" -b
           xcrun simctl status_bar "$DEVICE_ID" override --time "13:35" --dataNetwork wifi --wifiMode active --wifiBars 3 --cellularMode active --cellularBars 4 --operatorName "" --batteryState charged --batteryLevel 100
           xcrun simctl list devices | grep "$DEVICE_ID"
           echo "id=$DEVICE_ID" >> "$GITHUB_OUTPUT"
