@@ -18,29 +18,29 @@ final class CreateTaskAutoMessageShotTests: XCTestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 40), "create task form did not open")
         attach(app, "01-form-top")
 
-        title.tap()
-        title.typeText("Снять рилс для кофейни")
-
+        // Клавиатуру не открываем, листаем саму форму (Form = UICollectionView).
+        let form = app.collectionViews.firstMatch
         let placeholder = "Например: Здравствуйте! Пришлите портфолио и сроки"
         let byText = NSPredicate(
             format: "placeholderValue == %@ OR label == %@ OR value == %@",
             placeholder, placeholder, placeholder
         )
         let field = app.descendants(matching: .any).matching(byText).firstMatch
-        for _ in 0..<6 where !(field.exists && field.isHittable) {
-            app.swipeUp()
+        for _ in 0..<6 {
+            form.swipeUp()
         }
         attach(app, "02-auto-message-empty")
 
-        if field.exists && field.isHittable {
+        XCTAssertTrue(field.exists, "auto message field not found")
+        if field.exists {
             field.tap()
-            field.typeText("Здравствуйте! Пришлите портфолио и сроки. Ссылка на бриф: www.x5studio.app")
+            field.typeText("Здравствуйте! Пришлите портфолио и сроки. Бриф: www.x5studio.app")
         }
-        attach(app, "03-auto-message-filled")
+        attach(app, "03-auto-message-filled-keyboard")
 
-        // Убираем клавиатуру, чтобы видна была подпись под полем.
-        app.swipeDown()
-        attach(app, "04-auto-message-filled-no-keyboard")
+        form.swipeDown()
+        form.swipeUp()
+        attach(app, "04-auto-message-filled")
     }
 
     private func attach(_ app: XCUIApplication, _ name: String) {
