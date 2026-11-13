@@ -50,7 +50,10 @@ class ReleaseVersionSourceTests(unittest.TestCase):
             r'APP_VERSION\s*=\s*"([^"]+)"', fastfile
         ).group(1)
 
-        self.assertEqual(marketing_version, "1.1.21")
+        self.assertEqual(marketing_version, "1.1.22")
+        # 13.11: TestFlight 1.1.22 (273) — автосообщение в задании + ссылки в чате.
+        # Цель App Store-ревью (fastlane, asc-*.yml) пока остаётся 1.1.21 (272).
+        review_version = "1.1.21"
         # 09.10.2026: в App Store живая 1.1.10; ревью идёт как 1.1.15 сборка 251 из release/ios.
         # Сборка в TestFlight и цель ревью снова один и тот же номер.
         # 07.10.2026: тестовые TestFlight-сборки ушли вперёд (245 — фикс модуля
@@ -73,14 +76,14 @@ class ReleaseVersionSourceTests(unittest.TestCase):
         # на проверке Apple остаётся 268 (очередь не теряем), поэтому ниже цель ревью — 268.
         # 01.11: TestFlight 270 (управление бонусом новым: пауза, подарок, лимит); ревью — 268.
         # 03.11: 1.1.20 (270) в продаже → 1.1.21 (271): Meta SDK (ATT) + начисление кредитов владельцем.
-        self.assertEqual(runtime_build_number, "272")
-        self.assertEqual(fastlane_version, marketing_version)
+        self.assertEqual(runtime_build_number, "273")
+        self.assertEqual(fastlane_version, review_version)
         self.assertIn(
-            f"Version {marketing_version} build 272",
+            f"Version {review_version} build 272",
             review_notes,
         )
         self.assertIn(
-            f'EXPECTED_VERSION: "{marketing_version}"',
+            f'EXPECTED_VERSION: "{review_version}"',
             submit_workflow,
         )
         self.assertIn(
@@ -88,7 +91,7 @@ class ReleaseVersionSourceTests(unittest.TestCase):
             submit_workflow,
         )
         self.assertIn(
-            f'VERSION: "{marketing_version}"',
+            f'VERSION: "{review_version}"',
             prepare_workflow,
         )
         self.assertIn(
