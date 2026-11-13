@@ -615,7 +615,22 @@ final class HubService: ObservableObject {
     nonisolated static func cleanAutoMessage(_ raw: String?) -> String? {
         let trimmed = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        return String(trimmed.prefix(autoMessageLimit))
+        return clampAutoMessage(trimmed)
+    }
+
+    /// База считает char_length (кодовые точки), а эмодзи-семья — 1 символ Swift,
+    /// но 5 точек. Режем целыми символами, пока точек ≤ лимита.
+    nonisolated static func clampAutoMessage(_ text: String) -> String {
+        guard text.unicodeScalars.count > autoMessageLimit else { return text }
+        var result = ""
+        var scalars = 0
+        for character in text {
+            let size = character.unicodeScalars.count
+            if scalars + size > autoMessageLimit { break }
+            result.append(character)
+            scalars += size
+        }
+        return result
     }
 
     /// Inserts a new task. Returns the new task on success.

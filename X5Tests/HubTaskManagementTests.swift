@@ -136,6 +136,75 @@ final class HubTaskManagementTests: XCTestCase {
         XCTAssertEqual(new.cities, [])
     }
 
+    func testTaskDecodesOptionalAutoMessage() throws {
+        let old = try JSONDecoder().decode(HubTask.self, from: Data("""
+        {"id":"a","author_id":"b","title":"Old","status":"open"}
+        """.utf8))
+        XCTAssertNil(old.autoMessage)
+
+        let new = try JSONDecoder().decode(HubTask.self, from: Data("""
+        {"id":"a","author_id":"b","title":"New","status":"open","auto_message":"Пришлите портфолио"}
+        """.utf8))
+        XCTAssertEqual(new.autoMessage, "Пришлите портфолио")
+    }
+
+    func testAutoMessageTrimsEmptyToNilAndLimitCountsCodePoints() {
+        XCTAssertNil(HubService.cleanAutoMessage(nil))
+        XCTAssertNil(HubService.cleanAutoMessage("  \n "))
+        XCTAssertEqual(HubService.cleanAutoMessage("  Привет \n"), "Привет")
+        // Эмодзи-семья: 1 символ Swift, 5 кодовых точек (база считает точки).
+        let family = "👨‍👩‍👧"
+        let clamped = HubService.clampAutoMessage(String(repeating: family, count: 300))
+        XCTAssertLessThanOrEqual(clamped.unicodeScalars.count, HubService.autoMessageLimit)
+        XCTAssertEqual(clamped.count, 200)
+    }
+
+    @MainActor
+    func testUpdateTaskSendsNullAutoMessageToClearTemplate() async throws {
+        var capturedRequest: URLRequest?
+        HubTaskURLProtocol.handler = { request in
+            capturedRequest = request
+            return Self.response(
+                for: request,
+                body: """
+                [{"id":"11111111-1111-4111-8111-111111111111","author_id":"f3eea23f-0aeb-405b-ab35-2c53173b7a8f","title":"Task","status":"open"}]
+                """
+            )
+        }
+        let service = makeService()
+
+        _ = await service.updateTask(
+            taskId: taskID,
+            authorId: ownerID,
+            title: "Task",
+            description: "Details",
+            budget: "1000",
+            categories: ["design"],
+            countryCodes: [],
+            cities: [],
+            deadline: nil,
+            autoMessage: "   ",
+            sendsAutoMessage: true,
+            accessToken: "owner-token"
+        )
+
+        let request = try XCTUnwrap(capturedRequest)
+        let body = try requestJSON(request)
+        XCTAssertTrue(body["auto_message"] is NSNull)
+    }
+
+    func testChatLinksOnlyWebAndWwwBecomesHttps() {
+        XCTAssertEqual(
+            ChatLinkText.webURL("www.x5studio.app", detected: URL(string: "http://www.x5studio.app")),
+            URL(string: "https://www.x5studio.app")
+        )
+        XCTAssertEqual(
+            ChatLinkText.webURL("https://x5studio.app/a?b=1", detected: URL(string: "https://x5studio.app/a?b=1")),
+            URL(string: "https://x5studio.app/a?b=1")
+        )
+        XCTAssertNil(ChatLinkText.webURL("me@x5studio.app", detected: URL(string: "mailto:me@x5studio.app")))
+    }
+
     func testCompactLocationLabel() {
         XCTAssertEqual(CISLocations.compactLabel([], allLabel: "Все страны"), "Все страны")
         XCTAssertEqual(CISLocations.compactLabel(["Казахстан", "Россия"], allLabel: "-"), "Казахстан, Россия")

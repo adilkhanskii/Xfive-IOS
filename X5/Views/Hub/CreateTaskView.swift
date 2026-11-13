@@ -130,9 +130,8 @@ struct TaskAutoMessageSection: View {
                 .lineLimit(3...8)
                 .onChange(of: text) { newValue in
                     // Лимит базы — 1000 символов: лишнее обрезаем сразу при вводе.
-                    if newValue.count > HubService.autoMessageLimit {
-                        text = String(newValue.prefix(HubService.autoMessageLimit))
-                    }
+                    let clamped = HubService.clampAutoMessage(newValue)
+                    if clamped != newValue { text = clamped }
                 }
         }
     }
