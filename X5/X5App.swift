@@ -101,6 +101,9 @@ struct X5App: App {
         } else if ProcessInfo.processInfo.environment["X5_CREATE_TASK_QA_PREVIEW"] == "1" {
             // Скрин формы «Новое задание» в симуляторе, без входа и сети.
             CreateTaskView()
+        } else if ProcessInfo.processInfo.environment["X5_CHAT_QA_PREVIEW"] == "1" {
+            // Скрин чата со ссылками, мок-сообщения без сети.
+            ChatLinksQAPreview()
         } else {
             ContentView()
         }

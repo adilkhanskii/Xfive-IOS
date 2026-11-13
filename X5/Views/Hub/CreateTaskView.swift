@@ -18,7 +18,7 @@ struct CreateTaskView: View {
     @State private var cities: [String] = []
     @State private var deadline: Date = Calendar.current.date(byAdding: .day, value: 7, to: Date()) ?? Date()
     @State private var hasDeadline: Bool = false
-    @State private var autoMessage: String = ""
+    @State private var autoMessage: String = CreateTaskView.qaInitialAutoMessage
     @State private var saving: Bool = false
     @State private var errorMessage: String?
 
@@ -75,6 +75,15 @@ struct CreateTaskView: View {
             cities = CISLocations.keptCities(cities, in: newCountries)
         }
     }
+
+    #if DEBUG
+    /// Только QA-скрин в симуляторе: готовый текст шаблона из окружения.
+    private static var qaInitialAutoMessage: String {
+        ProcessInfo.processInfo.environment["X5_CREATE_TASK_QA_AUTOMESSAGE"] ?? ""
+    }
+    #else
+    private static var qaInitialAutoMessage: String { "" }
+    #endif
 
     private var canSubmit: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
