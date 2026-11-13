@@ -70,6 +70,9 @@ struct HubTask: Codable, Identifiable, Hashable {
     var countryCodesRaw: [String]? = nil
     var citiesRaw: [String]? = nil
     var categoriesRaw: [String]? = nil
+    /// Автосообщение автора: сервер сам шлёт его в чат при отклике.
+    /// var с nil — старая база без колонки декодируется как раньше.
+    var autoMessage: String? = nil
 
     /// Пусто = «Все страны».
     var countryCodes: [String] { Self.items(countryCodesRaw, fallback: countryCode) }
@@ -92,6 +95,7 @@ struct HubTask: Codable, Identifiable, Hashable {
         case countryCodesRaw = "country_codes"
         case citiesRaw = "cities"
         case categoriesRaw = "categories"
+        case autoMessage = "auto_message"
         case authorId = "author_id"
         case authorName = "author_name"
         case authorAvatar = "author_avatar"
@@ -512,6 +516,8 @@ final class HubService: ObservableObject {
         countryCodes: [String],
         cities: [String],
         deadline: Date?,
+        autoMessage: String? = nil,
+        sendsAutoMessage: Bool = false,
         accessToken: String
     ) async -> HubTask? {
         var body: [String: Any] = [
@@ -523,6 +529,11 @@ final class HubService: ObservableObject {
         body.merge(Self.locationCategoryFields(categories: categories, countryCodes: countryCodes, cities: cities)) { _, new in new }
         if let deadline {
             body["deadline"] = Self.iso8601String(from: deadline)
+        }
+        // Пустое → null, чтобы автор мог стереть шаблон. Ключ шлём, только если
+        // экран редактирования просит (sendsAutoMessage).
+        if sendsAutoMessage {
+            body["auto_message"] = Self.cleanAutoMessage(autoMessage).map { $0 as Any } ?? NSNull()
         }
 
         return await mutateOwnedTask(
@@ -597,9 +608,19 @@ final class HubService: ObservableObject {
         ]
     }
 
+    /// Лимит автосообщения (как в базе).
+    nonisolated static let autoMessageLimit = 1000
+
+    /// Обрезанный текст автосообщения; пустой → nil (в базу не пишем).
+    nonisolated static func cleanAutoMessage(_ raw: String?) -> String? {
+        let trimmed = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return String(trimmed.prefix(autoMessageLimit))
+    }
+
     /// Inserts a new task. Returns the new task on success.
     @discardableResult
-    func createTask(authorId: String, authorName: String?, authorAvatar: String?, companyName: String?, title: String, description: String, budget: String, categories: [String], countryCodes: [String], cities: [String], deadline: Date?, accessToken: String) async -> HubTask? {
+    func createTask(authorId: String, authorName: String?, authorAvatar: String?, companyName: String?, title: String, description: String, budget: String, categories: [String], countryCodes: [String], cities: [String], deadline: Date?, autoMessage: String? = nil, accessToken: String) async -> HubTask? {
         var request = URLRequest(url: baseURL.appendingPathComponent("rest/v1/tasks"))
         request.httpMethod = "POST"
         request.setValue(anonKey, forHTTPHeaderField: "apikey")
@@ -619,6 +640,8 @@ final class HubService: ObservableObject {
         if let n = authorName { body["author_name"] = n }
         if let a = authorAvatar { body["author_avatar"] = a }
         if let c = companyName, !c.isEmpty { body["company_name"] = c }
+        // Пустой шаблон не шлём: публикация без него — как раньше.
+        if let message = Self.cleanAutoMessage(autoMessage) { body["auto_message"] = message }
         if let d = deadline {
             let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime]
             body["deadline"] = f.string(from: d)

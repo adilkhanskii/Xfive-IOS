@@ -18,6 +18,7 @@ struct CreateTaskView: View {
     @State private var cities: [String] = []
     @State private var deadline: Date = Calendar.current.date(byAdding: .day, value: 7, to: Date()) ?? Date()
     @State private var hasDeadline: Bool = false
+    @State private var autoMessage: String = ""
     @State private var saving: Bool = false
     @State private var errorMessage: String?
 
@@ -45,6 +46,7 @@ struct CreateTaskView: View {
                     TaskCountriesPickerButton(countryCodes: $countryCodes)
                     CISMultiCityPickerButton(cities: $cities, countryCodes: countryCodes)
                 }
+                TaskAutoMessageSection(text: $autoMessage)
                 if let err = errorMessage {
                     Section { Text(err).foregroundColor(.red) }
                 }
@@ -101,6 +103,7 @@ struct CreateTaskView: View {
             countryCodes: countryCodes,
             cities: cities,
             deadline: hasDeadline ? deadline : nil,
+            autoMessage: autoMessage,
             accessToken: token
         )
         if inserted != nil {
@@ -108,6 +111,29 @@ struct CreateTaskView: View {
             dismiss()
         } else {
             errorMessage = "Could not post the task. Please try again."
+        }
+    }
+}
+
+/// Необязательный шаблон: сервер сам отправит его в чат один раз, когда
+/// исполнитель откликнется. Общий для «Новое задание» и редактирования.
+struct TaskAutoMessageSection: View {
+    @Binding var text: String
+    @EnvironmentObject private var loc: LocalizationService
+
+    var body: some View {
+        Section(
+            header: Text(loc.t("task_auto_message_section")),
+            footer: Text(loc.t("task_auto_message_footer"))
+        ) {
+            TextField(loc.t("task_auto_message_placeholder"), text: $text, axis: .vertical)
+                .lineLimit(3...8)
+                .onChange(of: text) { newValue in
+                    // Лимит базы — 1000 символов: лишнее обрезаем сразу при вводе.
+                    if newValue.count > HubService.autoMessageLimit {
+                        text = String(newValue.prefix(HubService.autoMessageLimit))
+                    }
+                }
         }
     }
 }

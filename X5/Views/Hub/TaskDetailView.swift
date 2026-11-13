@@ -240,6 +240,9 @@ struct TaskDetailView: View {
                let card = await chats.sendTaskCard(chatId: chat.id, currentUserId: uid, task: task, accessToken: token) {
                 rows.append(card)
                 chats.persistMessageCache(chatId: chat.id, rows: rows)
+                // Вместе с карточкой база кладёт автосообщение автора — перечитываем
+                // чат, чтобы оно было видно сразу (кэш обновит сам loadMessages).
+                _ = await chats.loadMessages(chatId: chat.id, accessToken: token, forceRefresh: true)
             }
             navigatingChat = chat
         }
