@@ -1314,6 +1314,57 @@ struct ChatThreadView: View {
 private let replyLinePrefix = "↪ "
 private let stickerLinePrefix = "x5_sticker:"
 
+/// Ссылки в тексте сообщения: http(s)://… и www.… становятся кликабельными.
+/// Нет ссылок → nil, пузырь рисуется обычным Text, как раньше.
+enum ChatLinkText {
+    private static let detector = try? NSDataDetector(
+        types: NSTextCheckingResult.CheckingType.link.rawValue
+    )
+
+    static func attributed(_ text: String, linkColor: Color) -> AttributedString? {
+        // Без точки ссылки не бывает — не гоняем детектор зря.
+        guard let detector, text.contains(".") else { return nil }
+        let matches = detector.matches(
+            in: text,
+            options: [],
+            range: NSRange(text.startIndex..., in: text)
+        )
+        // Собираем кусками по String-диапазонам: так эмодзи и переносы не ломаются.
+        var result = AttributedString()
+        var cursor = text.startIndex
+        var found = false
+        for match in matches {
+            guard let range = Range(match.range, in: text),
+                  range.lowerBound >= cursor,
+                  let url = webURL(String(text[range]), detected: match.url)
+            else { continue }
+            result.append(AttributedString(String(text[cursor..<range.lowerBound])))
+            var piece = AttributedString(String(text[range]))
+            piece.link = url
+            piece.foregroundColor = linkColor
+            piece.underlineStyle = Text.LineStyle.single
+            result.append(piece)
+            cursor = range.upperBound
+            found = true
+        }
+        guard found else { return nil }
+        result.append(AttributedString(String(text[cursor...])))
+        return result
+    }
+
+    /// Только веб-ссылки (почту/телефоны не трогаем); www.… и домен без схемы → https://.
+    static func webURL(_ raw: String, detected: URL?) -> URL? {
+        let lower = raw.lowercased()
+        if lower.hasPrefix("http://") || lower.hasPrefix("https://") {
+            return detected ?? URL(string: raw)
+        }
+        guard let scheme = detected?.scheme?.lowercased(),
+              scheme == "http" || scheme == "https"
+        else { return nil }
+        return URL(string: "https://" + raw) ?? detected
+    }
+}
+
 private struct FailedTextMessage {
     let outboundText: String
     let previewText: String
@@ -1650,12 +1701,24 @@ private struct Bubble: View {
                     .padding(.horizontal, 4)
                     .padding(.vertical, 2)
             } else {
-                Text(splitReplyText(message.content).body)
-                    .font(.system(size: 15))
-                    .foregroundColor(.white)
+                let textBody = splitReplyText(message.content).body
+                // Есть ссылка → кликабельная (тап открывает Safari), иначе Text как раньше.
+                if let linked = ChatLinkText.attributed(textBody, linkColor: Self.linkColor) {
+                    Text(linked)
+                        .font(.system(size: 15))
+                        .foregroundColor(.white)
+                        .tint(Self.linkColor)
+                } else {
+                    Text(textBody)
+                        .font(.system(size: 15))
+                        .foregroundColor(.white)
+                }
             }
         }
     }
+
+    /// Голубой — читается и на синем (свой), и на сером (чужой) пузыре.
+    private static let linkColor = Color(red: 0.55, green: 0.80, blue: 1.0)
 
     private var stickerText: String? {
         let body = splitReplyText(message.content).body

@@ -351,6 +351,7 @@ private struct EditTaskView: View {
     @State private var cities: [String]
     @State private var deadline: Date
     @State private var hasDeadline: Bool
+    @State private var autoMessage: String
     @State private var saving = false
     @State private var errorMessage: String?
 
@@ -368,6 +369,7 @@ private struct EditTaskView: View {
         _cities = State(initialValue: task.cities)
         _deadline = State(initialValue: parsedDeadline ?? Date())
         _hasDeadline = State(initialValue: parsedDeadline != nil)
+        _autoMessage = State(initialValue: task.autoMessage ?? "")
     }
 
     var body: some View {
@@ -403,6 +405,8 @@ private struct EditTaskView: View {
                     TaskCountriesPickerButton(countryCodes: $countryCodes)
                     CISMultiCityPickerButton(cities: $cities, countryCodes: countryCodes)
                 }
+
+                TaskAutoMessageSection(text: $autoMessage)
 
                 if let errorMessage {
                     Section {
@@ -466,6 +470,9 @@ private struct EditTaskView: View {
             countryCodes: countryCodes,
             cities: cities,
             deadline: hasDeadline ? deadline : nil,
+            autoMessage: autoMessage,
+            // Ключ шлём, если шаблон был или появился: пустое поле стирает его в базе.
+            sendsAutoMessage: task.autoMessage != nil || HubService.cleanAutoMessage(autoMessage) != nil,
             accessToken: token
         )
         if updated != nil {
