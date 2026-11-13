@@ -51,6 +51,10 @@ jobs:
           DEVICE_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for a in d["devices"].values() for x in a if x.get("isAvailable") and x.get("name", "") == "iPhone 16e") if any(x.get("isAvailable") and x.get("name","") == "iPhone 16e" for a in d["devices"].values() for x in a) else next(x["udid"] for a in d["devices"].values() for x in a if x.get("isAvailable") and x.get("name", "").startswith("iPhone")))')
           xcrun simctl shutdown "$DEVICE_ID" || true
           xcrun simctl erase "$DEVICE_ID"
+          # Ровная строка состояния для скрина: время как у мок-сообщений, полный сигнал.
+          xcrun simctl boot "$DEVICE_ID"
+          xcrun simctl bootstatus "$DEVICE_ID" -b
+          xcrun simctl status_bar "$DEVICE_ID" override --time "13:35" --dataNetwork wifi --wifiMode active --wifiBars 3 --cellularMode active --cellularBars 4 --operatorName "" --batteryState charged --batteryLevel 100
           xcrun simctl list devices | grep "$DEVICE_ID"
           echo "id=$DEVICE_ID" >> "$GITHUB_OUTPUT"
       - name: Create task form screenshot (390 pt)

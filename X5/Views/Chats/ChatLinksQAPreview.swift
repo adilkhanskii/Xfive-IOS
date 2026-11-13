@@ -48,8 +48,10 @@ struct ChatLinksQAPreview: View {
     private static func rows() -> [ChatMessageRow] {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        func row(_ id: String, _ sender: String, _ text: String, minutesAgo: Double) -> ChatMessageRow {
-            ChatMessageRow(
+        // Сегодня в фиксированное время — совпадает со строкой состояния скрина (13:35).
+        func row(_ id: String, _ sender: String, _ text: String, minute: Int) -> ChatMessageRow {
+            let date = Calendar.current.date(bySettingHour: 13, minute: minute, second: 0, of: Date()) ?? Date()
+            return ChatMessageRow(
                 id: id,
                 chatId: chat.id,
                 senderId: sender,
@@ -57,13 +59,13 @@ struct ChatLinksQAPreview: View {
                 content: text,
                 mediaUrl: nil,
                 mediaMime: nil,
-                createdAt: formatter.string(from: Date().addingTimeInterval(-minutesAgo * 60))
+                createdAt: formatter.string(from: date)
             )
         }
         return [
-            row("qa-1", me, "Здравствуйте! Спасибо за отклик. Пришлите портфолио и сроки", minutesAgo: 12),
-            row("qa-2", peer, "Портфолио тут: https://www.behance.net/x5-design", minutesAgo: 8),
-            row("qa-3", me, "Бриф здесь: www.x5marketing.com/brief", minutesAgo: 3)
+            row("qa-1", me, "Здравствуйте! Спасибо за отклик. Пришлите портфолио и сроки", minute: 20),
+            row("qa-2", peer, "Портфолио тут: https://www.behance.net/x5-design", minute: 24),
+            row("qa-3", me, "Бриф здесь: www.x5marketing.com/brief", minute: 29)
         ]
     }
 }
