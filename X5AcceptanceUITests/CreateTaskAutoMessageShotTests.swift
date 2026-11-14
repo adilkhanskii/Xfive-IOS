@@ -1,7 +1,7 @@
 import XCTest
 
 /// QA-скрины 390 pt: форма «Новое задание» с заполненным автосообщением и чат
-/// со ссылками. Только ручной прогон: TEST_RUNNER_X5_CREATE_TASK_SHOT=1; экраны
+/// автора: карточка отклика + автосообщение. Только ручной прогон: TEST_RUNNER_X5_CREATE_TASK_SHOT=1; экраны
 /// открывают DEBUG-флаги (без входа, без сети, ничего не публикуют).
 final class CreateTaskAutoMessageShotTests: XCTestCase {
     private let ruArguments = ["-AppleLanguages", "(ru)", "-AppleLocale", "ru_KZ", "-x5.language", "ru"]
@@ -25,7 +25,7 @@ final class CreateTaskAutoMessageShotTests: XCTestCase {
         attach(app, "automsg-ios-form")
     }
 
-    func testChatShowsTappableLinksOnBothBubbleColors() throws {
+    func testChatShowsTaskCardThenAutoMessage() throws {
         try requireManualRun()
         continueAfterFailure = true
         let app = XCUIApplication()
@@ -33,12 +33,17 @@ final class CreateTaskAutoMessageShotTests: XCTestCase {
         app.launchEnvironment["X5_CHAT_QA_PREVIEW"] = "1"
         app.launch()
 
-        let brief = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS %@", "Бриф здесь"))
+        // Вид автора: карточка «Отклик по заданию» от исполнителя, под ней автосообщение.
+        let card = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@", "Нужен таргетолог"))
             .firstMatch
-        XCTAssertTrue(brief.waitForExistence(timeout: 40), "mock chat did not open")
+        XCTAssertTrue(card.waitForExistence(timeout: 40), "task card did not appear")
+        let autoMessage = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@", "Пришлите портфолио"))
+            .firstMatch
+        XCTAssertTrue(autoMessage.waitForExistence(timeout: 20), "auto message did not appear")
         sleep(2)
-        attach(app, "links-ios-chat")
+        attach(app, "card-ios-author")
     }
 
     private func requireManualRun() throws {
