@@ -29,4 +29,10 @@ enum Roles {
     static func canReorderCourses(userId: String?) -> Bool {
         userId?.lowercased() == courseOrderOwnerUserId
     }
+
+    /// Кто откликнулся на задание, видит только аккаунт Адильхана (14.11: «полный
+    /// список видит только мой аккаунт»). Остальным, и авторам тоже, — только число.
+    static func canSeeTaskResponders(userId: String?) -> Bool {
+        userId?.lowercased() == courseOrderOwnerUserId
+    }
 }

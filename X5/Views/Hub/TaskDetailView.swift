@@ -17,6 +17,7 @@ struct TaskDetailView: View {
     @State private var acceptError: String?
 
     private var isAuthor: Bool { auth.userId == task.authorId }
+    private var canSeeResponders: Bool { Roles.canSeeTaskResponders(userId: auth.userId) }
     private var hasRespondedAlready: Bool {
         guard let me = auth.userId else { return false }
         return responses.contains { $0.specialistId == me }
@@ -110,7 +111,7 @@ struct TaskDetailView: View {
                     Text(loc.t("hub_no_responses"))
                         .font(.system(size: 12))
                         .foregroundColor(.white.opacity(0.5))
-                } else {
+                } else if canSeeResponders {
                     ForEach(responses) { r in responseRow(r) }
                 }
 
