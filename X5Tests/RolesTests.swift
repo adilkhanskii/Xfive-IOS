@@ -15,4 +15,13 @@ final class RolesTests: XCTestCase {
         XCTAssertFalse(Roles.isDeveloper(email: "tuakov.ursa@gmail.com", userId: nil))
         XCTAssertFalse(Roles.isDeveloper(email: nil, userId: nil))
     }
+
+    func testOnlyAdilkhanSeesTaskResponders() {
+        XCTAssertTrue(Roles.canSeeTaskResponders(userId: adilkhanUserId))
+        XCTAssertTrue(Roles.canSeeTaskResponders(userId: adilkhanUserId.uppercased()))
+        // Второй разработчик и авторы заданий видят только число откликов.
+        XCTAssertFalse(Roles.canSeeTaskResponders(userId: ownerUserId))
+        XCTAssertFalse(Roles.canSeeTaskResponders(userId: "9ae99a45-91ac-486a-b7ec-e6614b7bc257"))
+        XCTAssertFalse(Roles.canSeeTaskResponders(userId: nil))
+    }
 }
