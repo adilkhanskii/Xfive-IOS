@@ -199,6 +199,12 @@ struct TaskDetailView: View {
         }
         .task {
             chats.configureAccessTokenProvider(auth: auth)
+            #if DEBUG
+            if TaskRespondersQAPreview.isOn {
+                responses = TaskRespondersQAPreview.responses
+                return
+            }
+            #endif
             responses = await service.loadResponses(taskId: task.id)
         }
         .sheet(item: $navigatingChat) { chat in

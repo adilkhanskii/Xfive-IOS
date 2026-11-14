@@ -98,6 +98,9 @@ struct X5App: App {
         #if DEBUG
         if ProcessInfo.processInfo.environment["X5_HOME_QA_PREVIEW"] == "1" {
             AppTabView()
+        } else if TaskRespondersQAPreview.isOn {
+            // Скрин страницы задания с мок-откликами, без входа и сети.
+            TaskRespondersQAPreview()
         } else {
             ContentView()
         }

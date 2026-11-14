@@ -111,6 +111,13 @@ final class Auth: ObservableObject {
         store(session: session)
     }
 
+    #if DEBUG
+    /// Только QA-скрин в симуляторе: «свой» id без токена, сеть не трогается.
+    func qaPreviewUserId(_ id: String) {
+        userId = id
+    }
+    #endif
+
     func signOut() async {
         let pushUnregistered: Bool
         if let userId, let accessToken {
