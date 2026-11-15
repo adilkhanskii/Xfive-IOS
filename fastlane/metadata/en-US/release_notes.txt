@@ -1,1 +1,1 @@
-Owners can now grant credits to users right from the profile. Improved ad attribution and analytics. Bug fixes and stability improvements
+Automatic message in Hub tasks: the specialist gets it in the chat after responding. Links in chats open with a tap. The task page shows the number of responses. Bug fixes and stability improvements
