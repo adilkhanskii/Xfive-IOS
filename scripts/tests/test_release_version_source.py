@@ -52,9 +52,10 @@ class ReleaseVersionSourceTests(unittest.TestCase):
 
         self.assertEqual(marketing_version, "1.1.22")
         # 13.11: TestFlight 1.1.22 (273) — автосообщение в задании + ссылки в чате.
-        # Цель App Store-ревью (fastlane, asc-*.yml) пока остаётся 1.1.21 (272).
+        # Цель App Store-ревью (fastlane, asc-*.yml) тогда оставалась 1.1.21 (272).
         # 14.11: TestFlight 1.1.22 (274) — на странице задания только число откликов.
-        review_version = "1.1.21"
+        # 15.11: клиент «можешь выставлять в апстор» — 1.1.21 (272) в продаже → ревью 1.1.22 (274).
+        review_version = "1.1.22"
         # 09.10.2026: в App Store живая 1.1.10; ревью идёт как 1.1.15 сборка 251 из release/ios.
         # Сборка в TestFlight и цель ревью снова один и тот же номер.
         # 07.10.2026: тестовые TestFlight-сборки ушли вперёд (245 — фикс модуля
@@ -80,7 +81,7 @@ class ReleaseVersionSourceTests(unittest.TestCase):
         self.assertEqual(runtime_build_number, "274")
         self.assertEqual(fastlane_version, review_version)
         self.assertIn(
-            f"Version {review_version} build 272",
+            f"Version {review_version} build 274",
             review_notes,
         )
         self.assertIn(
@@ -88,7 +89,7 @@ class ReleaseVersionSourceTests(unittest.TestCase):
             submit_workflow,
         )
         self.assertIn(
-            'EXPECTED_BUILD: "272"',
+            'EXPECTED_BUILD: "274"',
             submit_workflow,
         )
         self.assertIn(
@@ -96,7 +97,7 @@ class ReleaseVersionSourceTests(unittest.TestCase):
             prepare_workflow,
         )
         self.assertIn(
-            'BUILD_NUMBER: "272"',
+            'BUILD_NUMBER: "274"',
             prepare_workflow,
         )
 
