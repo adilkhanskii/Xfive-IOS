@@ -68,8 +68,13 @@ struct StartupChatView: View {
                     introCard
 
                     ForEach(messages) { message in
-                        StartupChatBubble(message: message)
-                            .id(message.id)
+                        StartupChatBubble(
+                            message: message,
+                            // Жалоба — на ответы ИИ; первое приветствие заготовлено, не ИИ.
+                            showsReport: message.role == .assistant && message.id != messages.first?.id,
+                            reportPrompt: userQuestion(before: message)
+                        )
+                        .id(message.id)
                     }
 
                     if isSending {
@@ -412,6 +417,12 @@ struct StartupChatView: View {
         return "Повторить можно через \(remaining) сек"
     }
 
+    /// Вопрос пользователя перед ответом ИИ — уходит в жалобу как запрос.
+    private func userQuestion(before message: StartupChatMessage) -> String? {
+        guard let index = messages.firstIndex(where: { $0.id == message.id }) else { return nil }
+        return messages[..<index].last(where: { $0.role == .user })?.content
+    }
+
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
         let target: AnyHashable
         if isSending {
@@ -429,6 +440,8 @@ struct StartupChatView: View {
 
 private struct StartupChatBubble: View {
     let message: StartupChatMessage
+    var showsReport = false
+    var reportPrompt: String? = nil
 
     var body: some View {
         HStack {
@@ -436,26 +449,36 @@ private struct StartupChatBubble: View {
                 Spacer(minLength: 58)
             }
 
-            Text(message.content)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundColor(message.role == .user ? .black : .white)
-                .textSelection(.enabled)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 11)
-                .background(
-                    message.role == .user
-                        ? X5Style.blue
-                        : Color.white.opacity(0.09)
-                )
-                .clipShape(
-                    RoundedRectangle(cornerRadius: 17, style: .continuous)
-                )
-                .overlay {
-                    if message.role == .assistant {
-                        RoundedRectangle(cornerRadius: 17)
-                            .stroke(Color.white.opacity(0.10), lineWidth: 1)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(message.content)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(message.role == .user ? .black : .white)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                    .background(
+                        message.role == .user
+                            ? X5Style.blue
+                            : Color.white.opacity(0.09)
+                    )
+                    .clipShape(
+                        RoundedRectangle(cornerRadius: 17, style: .continuous)
+                    )
+                    .overlay {
+                        if message.role == .assistant {
+                            RoundedRectangle(cornerRadius: 17)
+                                .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                        }
                     }
+                if showsReport {
+                    AIContentReportButton(
+                        tool: "startup-chat",
+                        contentText: message.content,
+                        prompt: reportPrompt,
+                        compact: true
+                    )
                 }
+            }
 
             if message.role == .assistant {
                 Spacer(minLength: 58)

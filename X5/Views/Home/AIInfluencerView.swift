@@ -284,6 +284,17 @@ struct AIInfluencerView: View {
         .x5ClearGlass(cornerRadius: 20, highlight: 0.08)
     }
 
+    /// Для жалобы на портреты: id ассетов и описание образа из анкеты.
+    private var portraitReportReference: String {
+        imageCandidates.map { "asset:\($0.assetID)" }.joined(separator: ",")
+    }
+
+    private var portraitReportPrompt: String {
+        [face, bodyDescription, skin, hair, outfit, accessories, extra]
+            .filter { !$0.isEmpty }
+            .joined(separator: "; ")
+    }
+
     private var imageStep: some View {
         VStack(alignment: .leading, spacing: 14) {
             sectionTitle("2 · ИЗОБРАЖЕНИЕ")
@@ -345,6 +356,11 @@ struct AIInfluencerView: View {
                         .buttonStyle(.plain)
                     }
                 }
+                AIContentReportButton(
+                    tool: "influencer-portrait",
+                    contentURL: portraitReportReference,
+                    prompt: portraitReportPrompt
+                )
                 primaryButton(title: isWorking ? "Подтверждаем…" : "Подтвердить образ", enabled: selectedImageID != nil && !isWorking) {
                     approveImage()
                 }
@@ -402,6 +418,11 @@ struct AIInfluencerView: View {
                     voicePlayer?.pause(); voicePlayer = nil; self.voiceResult = nil
                 }
                 .font(.subheadline.bold()).foregroundStyle(Color.accentColor)
+                AIContentReportButton(
+                    tool: "influencer-voice",
+                    contentURL: AIContentReport.reference(assetID: voiceResult.assetID, url: voiceResult.audioURL),
+                    contentText: testPhrase
+                )
             } else {
                 primaryButton(
                     title: isWorking ? "Создаём тест…" : "Создать тест · \(VoiceGenerationService.creditCost(for: testPhrase)) кредитов",
@@ -464,6 +485,12 @@ struct AIInfluencerView: View {
                             .frame(maxWidth: .infinity).frame(height: 48)
                             .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 14))
                     }
+                    AIContentReportButton(
+                        tool: "influencer-video",
+                        contentURL: AIContentReport.reference(assetID: finalJob.resultAssetID, url: url),
+                        contentText: speechText,
+                        prompt: scene
+                    )
                 }
             }
         }

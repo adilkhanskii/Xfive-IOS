@@ -25,6 +25,7 @@ import {
   shouldFallbackGoogleToGPT,
   shouldRetryGoogleWithNextKey,
 } from "./economy.mjs";
+import { isPromptBlocked } from "./promptSafety.ts";
 
 const OPENAI_URL = "https://api.openai.com/v1/images/generations";
 const OPENAI_EDIT_URL = "https://api.openai.com/v1/images/edits";
@@ -122,6 +123,11 @@ Deno.serve(async (req) => {
       return json({ error: error.code }, error.status);
     }
     return json({ error: "invalid_json" }, 400);
+  }
+
+  // Правила Google Play об ИИ-контенте: сексуальные и жестокие запросы не генерируем, кредиты не списываем.
+  if (isPromptBlocked(normalized.prompt)) {
+    return json({ error: "content_rejected" }, 422);
   }
 
   const providerKeys = getProviderKeys(normalized.provider);

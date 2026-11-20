@@ -518,6 +518,9 @@ enum SupabaseError: LocalizedError {
             return "Credit service is unavailable."
         case "provider_error":
             return "Image provider error."
+        case "content_rejected":
+            // Сервер не генерирует сексуальные и жестокие запросы (правила ИИ-контента), кредиты не списаны.
+            return "Запрос отклонён: сексуальный или жестокий контент запрещён. Измените описание. / Request blocked: sexual or violent content is not allowed."
         default:
             return nil
         }

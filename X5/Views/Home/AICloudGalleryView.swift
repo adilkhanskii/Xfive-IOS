@@ -285,6 +285,14 @@ private struct AICloudAssetPreview: View {
                     }
                 }
             }
+            .safeAreaInset(edge: .bottom) {
+                AIContentReportButton(
+                    tool: "cloud:\(asset.assetType)",
+                    contentURL: "asset:\(asset.id)",
+                    contentText: asset.title
+                )
+                .padding(.bottom, 8)
+            }
             .navigationTitle(asset.title ?? "Результат")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarColorScheme(.dark, for: .navigationBar)

@@ -174,6 +174,7 @@ struct ImageGeneratorView: View {
                 Task { await generate(promptOverride: clean, referencesOverride: [reference]) }
             })
             .environmentObject(loc)
+            .environmentObject(auth)
         }
     }
 
@@ -883,6 +884,12 @@ struct ImageGeneratorView: View {
                 }
                 .font(.system(size: 13, weight: .bold))
                 .foregroundColor(.white.opacity(0.82))
+
+                AIContentReportButton(
+                    tool: "image:\(generatedAsset.category)",
+                    contentURL: AIContentReport.reference(assetID: generatedAsset.cloudAssetID),
+                    prompt: generatedAsset.prompt
+                )
             }
             .padding(12)
             .x5ClearGlass(cornerRadius: 18, highlight: 0.10)
@@ -1824,6 +1831,11 @@ private struct GeneratedImageViewer: View {
                         .padding(.horizontal, 14)
                     metaBar
                     regenerateBar
+                    AIContentReportButton(
+                        tool: "image:\(asset.category)",
+                        contentURL: AIContentReport.reference(assetID: asset.cloudAssetID),
+                        prompt: asset.prompt
+                    )
                     Spacer(minLength: 0)
                 }
 
