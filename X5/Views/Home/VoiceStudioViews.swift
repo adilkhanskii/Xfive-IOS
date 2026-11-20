@@ -887,6 +887,11 @@ struct VoiceDesignSheet: View {
                         ForEach(Array(previews.enumerated()), id: \.element.id) { index, preview in
                             previewRow(index: index, preview: preview)
                         }
+                        AIContentReportButton(
+                            tool: "voice-design",
+                            contentText: previews.map(\.id).joined(separator: ","),
+                            prompt: descriptionText
+                        )
                         studioField("Название голоса", text: $name)
                         StudioPrimaryButton(
                             title: "Выбрать этот голос",

@@ -217,6 +217,10 @@ struct LiveFruitsView: View {
                 Label(story.characterBible, systemImage: "person.crop.square")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(X5Style.blueSoft)
+                AIContentReportButton(
+                    tool: "fruit-story",
+                    contentText: "\(story.title)\n\(story.summary)\n\(story.characterBible)"
+                )
             }
             .padding(.vertical, 5)
         }
@@ -261,6 +265,11 @@ struct LiveFruitsView: View {
                     .frame(maxWidth: .infinity)
                     .aspectRatio(9 / 16, contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                AIContentReportButton(
+                    tool: "fruit-frame",
+                    contentText: scene.wrappedValue.action,
+                    prompt: scene.wrappedValue.visualPrompt
+                )
             }
 
             if characterReferenceBase64 != nil {
@@ -319,6 +328,10 @@ struct LiveFruitsView: View {
                         .scaledToFit()
                         .frame(maxHeight: 330)
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    AIContentReportButton(
+                        tool: "fruit-character",
+                        prompt: story.characterBible
+                    )
                 }
             }
 
@@ -400,6 +413,12 @@ struct LiveFruitsView: View {
                     .font(.system(size: 14, weight: .bold))
                     .foregroundColor(X5Style.blue)
                 }
+                // Две кнопки в строке List: borderless — каждая ловит только свой тап.
+                .buttonStyle(.borderless)
+                AIContentReportButton(
+                    tool: "fruit-video",
+                    contentURL: AIContentReport.reference(assetID: job.assetID, url: resultURL)
+                )
             }
         }
     }

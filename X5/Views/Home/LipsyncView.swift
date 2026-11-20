@@ -260,6 +260,11 @@ struct LipsyncView: View {
                         .frame(height: 48)
                         .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 14))
                 }
+                AIContentReportButton(
+                    tool: "lipsync",
+                    contentURL: AIContentReport.reference(assetID: job.resultAssetID, url: url),
+                    prompt: speechText
+                )
             }
         }
         .padding(16)

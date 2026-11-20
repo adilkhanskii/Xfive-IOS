@@ -655,6 +655,12 @@ struct VideoGeneratorView: View {
                         .buttonStyle(.plain)
                         .disabled(isSavingResult)
                     }
+
+                    AIContentReportButton(
+                        tool: "video",
+                        contentURL: AIContentReport.reference(assetID: job.assetID, url: job.resultURL),
+                        prompt: prompt
+                    )
                 } else if isPreparingResultFile {
                     HStack(spacing: 10) {
                         ProgressView().tint(Color.accentColor)

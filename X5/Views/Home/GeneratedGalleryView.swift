@@ -167,6 +167,11 @@ private struct GeneratedGalleryPreviewView: View {
                         .foregroundColor(.white.opacity(0.62))
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 20)
+                    AIContentReportButton(
+                        tool: "gallery:\(preview.item.category)",
+                        contentURL: "local:\(preview.item.id)",
+                        prompt: preview.item.prompt
+                    )
                     Spacer(minLength: 0)
                 }
 

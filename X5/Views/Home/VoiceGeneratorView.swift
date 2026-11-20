@@ -637,6 +637,12 @@ struct VoiceGeneratorView: View {
                     .disabled(isPreparingShareFile || resultRequestID == nil)
                 }
             }
+
+            AIContentReportButton(
+                tool: "voice",
+                contentURL: AIContentReport.reference(assetID: result.assetID, url: result.audioURL),
+                contentText: text
+            )
         }
         .padding(16)
         .background(
