@@ -202,6 +202,14 @@ private struct AIContentReportSheet: View {
     private func submit() async {
         guard let reason, phase != .sending else { return }
         phase = .sending
+        #if DEBUG
+        // Только QA-скрин: без сервера показываем «спасибо».
+        if AIReportQAPreview.isOn {
+            _ = reason
+            phase = .done
+            return
+        }
+        #endif
         guard let userId = auth.userId, let token = await auth.freshAccessToken() else {
             phase = .signedOut
             return

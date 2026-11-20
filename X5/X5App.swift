@@ -98,6 +98,9 @@ struct X5App: App {
         #if DEBUG
         if ProcessInfo.processInfo.environment["X5_HOME_QA_PREVIEW"] == "1" {
             AppTabView()
+        } else if AIReportQAPreview.isOn {
+            // Скрин кнопки «Пожаловаться» под результатом ИИ, без входа и сети.
+            AIReportQAPreview()
         } else {
             ContentView()
         }

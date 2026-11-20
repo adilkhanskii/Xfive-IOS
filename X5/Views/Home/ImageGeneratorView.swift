@@ -1584,7 +1584,7 @@ struct ImageGeneratorView: View {
     }
 }
 
-private struct GeneratedImageAsset: Identifiable {
+struct GeneratedImageAsset: Identifiable {
     let id = UUID()
     var image: UIImage
     let prompt: String
@@ -1789,7 +1789,7 @@ private struct GenerationAnimationView: View {
     }
 }
 
-private struct GeneratedImageViewer: View {
+struct GeneratedImageViewer: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var loc: LocalizationService
 

@@ -10,7 +10,7 @@ permissions:
 on:
   workflow_dispatch:
   push:
-    branches: [fix/apple-reject-1121-272]
+    branches: [qa/ai-report-shot-1120]
     paths:
       - "X5/**"
       - "X5AcceptanceUITests/**"
@@ -48,23 +48,33 @@ jobs:
         id: simulator
         shell: bash
         run: |
-          DEVICE_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for a in d["devices"].values() for x in a if x.get("isAvailable") and x.get("name", "").startswith("iPhone 17")) if any(x.get("name","").startswith("iPhone 17") for a in d["devices"].values() for x in a) else next(x["udid"] for a in d["devices"].values() for x in a if x.get("isAvailable") and x.get("name", "").startswith("iPhone")))')
+          DEVICE_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for a in d["devices"].values() for x in a if x.get("isAvailable") and x.get("name", "") == "iPhone 16e") if any(x.get("isAvailable") and x.get("name","") == "iPhone 16e" for a in d["devices"].values() for x in a) else next(x["udid"] for a in d["devices"].values() for x in a if x.get("isAvailable") and x.get("name", "").startswith("iPhone")))')
           xcrun simctl shutdown "$DEVICE_ID" || true
           xcrun simctl erase "$DEVICE_ID"
+          # Ровная строка состояния для скрина: время как у мок-сообщений, полный сигнал.
+          xcrun simctl boot "$DEVICE_ID"
+          xcrun simctl bootstatus "$DEVICE_ID" -b
+          # Системный язык ru и 24-часовой формат — время в строке состояния как в пузырях.
+          xcrun simctl spawn "$DEVICE_ID" defaults write -g AppleLanguages -array ru
+          xcrun simctl spawn "$DEVICE_ID" defaults write -g AppleLocale ru_KZ
+          xcrun simctl spawn "$DEVICE_ID" defaults write -g AppleICUForce24HourTime -bool YES
+          xcrun simctl shutdown "$DEVICE_ID"
+          xcrun simctl boot "$DEVICE_ID"
+          xcrun simctl bootstatus "$DEVICE_ID" -b
+          xcrun simctl status_bar "$DEVICE_ID" override --time "18:40" --dataNetwork wifi --wifiMode active --wifiBars 3 --cellularMode active --cellularBars 4 --operatorName "" --batteryState charged --batteryLevel 100
           xcrun simctl list devices | grep "$DEVICE_ID"
           echo "id=$DEVICE_ID" >> "$GITHUB_OUTPUT"
-      - name: Fresh install → ATT prompt test
+      - name: AI report button screenshots (390 pt)
         shell: bash
         env:
-          TEST_RUNNER_X5_EXPECT_ATT: "1"
+          TEST_RUNNER_X5_AI_REPORT_SHOT: "1"
         run: |
           set -o pipefail
           xcodebuild test -project X5.xcodeproj -scheme X5-Acceptance-CI \
             -configuration Debug \
             -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.id }}' \
-            -only-testing:X5AcceptanceUITests/TrackingPromptFreshInstallTests \
+            -only-testing:X5AcceptanceUITests/AIReportShotTests \
             -resultBundlePath "$RUNNER_TEMP/att.xcresult" \
-            FACEBOOK_APP_ID=1234567890 FACEBOOK_CLIENT_TOKEN=ci-test-token \
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=YES \
             COMPILER_INDEX_STORE_ENABLE=NO
       - name: Export screenshots
@@ -77,7 +87,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: att-fresh-install-screens
+          name: ai-report-screens
           path: ${{ runner.temp }}/att-screens/**
           if-no-files-found: warn
           retention-days: 7
