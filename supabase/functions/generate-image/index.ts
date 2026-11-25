@@ -18,6 +18,7 @@ import {
   GenerationRequestError,
   googleResponseFormat,
   hasUsableGenerationProvider,
+  isProviderSafetyRejection,
   normalizeGenerationRequest,
   normalizeProviderKeys,
   safeProviderErrorMessage,
@@ -26,6 +27,7 @@ import {
   shouldRetryGoogleWithNextKey,
 } from "./economy.mjs";
 import { isPromptBlocked } from "./promptSafety.ts";
+import { isPromptFlagged } from "./moderation.ts";
 
 const OPENAI_URL = "https://api.openai.com/v1/images/generations";
 const OPENAI_EDIT_URL = "https://api.openai.com/v1/images/edits";
@@ -61,7 +63,7 @@ type LedgerResponse = {
   asset_ids?: unknown[];
 };
 type ProviderPayload = {
-  error?: { message?: string };
+  error?: { message?: string; code?: string };
   data?: Array<{ b64_json?: string }>;
   [key: string]: unknown;
 };
@@ -127,6 +129,11 @@ Deno.serve(async (req) => {
 
   // Правила Google Play об ИИ-контенте: сексуальные и жестокие запросы не генерируем, кредиты не списываем.
   if (isPromptBlocked(normalized.prompt)) {
+    return json({ error: "content_rejected" }, 422);
+  }
+  // Второй слой — модерация OpenAI ловит пересказы, которых нет в списке слов
+  // («Show the woman with nothing on» — рецензент Google 25.11).
+  if (await isPromptFlagged(normalized.prompt, getProviderKeys("gpt")[0])) {
     return json({ error: "content_rejected" }, 422);
   }
 
@@ -305,7 +312,13 @@ Deno.serve(async (req) => {
             ? (googleError as Error & { status?: number }).status || 503
             : 503,
         );
-        if (!fallbackOpenAIKey || !shouldFallbackGoogleToGPT(googleStatus)) {
+        if (
+          !fallbackOpenAIKey || !shouldFallbackGoogleToGPT(googleStatus) ||
+          isProviderSafetyRejection(
+            googleStatus,
+            googleError instanceof Error ? googleError.message : "",
+          )
+        ) {
           throw googleError;
         }
 
@@ -391,22 +404,35 @@ Deno.serve(async (req) => {
         ? (error as Error & { status?: number }).status || 0
         : 0,
     );
-    const providerErrorCode = providerHealthErrorCode(providerStatus);
+    const safetyRejected = isProviderSafetyRejection(
+      providerStatus,
+      error instanceof Error ? error.message : "",
+      error instanceof Error && "code" in error
+        ? String((error as Error & { code?: unknown }).code || "")
+        : "",
+    );
+    const providerErrorCode = safetyRejected
+      ? "content_rejected"
+      : providerHealthErrorCode(providerStatus);
     console.error(JSON.stringify({
-      event: "image_generation_provider_failed",
+      event: safetyRejected
+        ? "image_generation_provider_safety_rejected"
+        : "image_generation_provider_failed",
       provider: normalized.provider,
       model: normalized.model,
       reason: upstreamReason,
     }));
-    await callServiceRpc("record_ai_provider_health", {
-      p_provider: normalized.provider === "gpt"
-        ? "openai"
-        : normalized.provider,
-      p_capability: "image",
-      p_success: false,
-      p_model: normalized.model,
-      p_error_code: providerErrorCode,
-    }).catch(() => null);
+    if (!safetyRejected) {
+      await callServiceRpc("record_ai_provider_health", {
+        p_provider: normalized.provider === "gpt"
+          ? "openai"
+          : normalized.provider,
+        p_capability: "image",
+        p_success: false,
+        p_model: normalized.model,
+        p_error_code: providerErrorCode,
+      }).catch(() => null);
+    }
     const refund = await callServiceRpc("fail_image_generation_request", {
       p_user_id: user.id,
       p_request_key: identity.requestKey,
@@ -448,6 +474,9 @@ Deno.serve(async (req) => {
           : "unknown",
       }));
     });
+    if (safetyRejected) {
+      return json({ error: "content_rejected" }, 422);
+    }
     return json({
       error: "provider_error",
       provider: normalized.provider,
@@ -567,7 +596,7 @@ async function generateWithGPT(
   if (!response.ok) {
     throw Object.assign(
       new Error(payload?.error?.message || `OpenAI error ${response.status}`),
-      { status: response.status },
+      { status: response.status, code: payload?.error?.code },
     );
   }
 
@@ -629,7 +658,7 @@ async function editWithGPT(
       new Error(
         payload?.error?.message || `OpenAI edit error ${response.status}`,
       ),
-      { status: response.status },
+      { status: response.status, code: payload?.error?.code },
     );
   }
 
