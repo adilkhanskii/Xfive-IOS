@@ -10,8 +10,70 @@ type ModerationPayload = {
   results?: Array<{
     flagged?: boolean;
     categories?: Record<string, boolean>;
+    category_scores?: Record<string, number>;
   }>;
 };
+
+// Третий слой — сама готовая картинка: пересказ можно придумать любой
+// («Have the woman wear nothing but a necklace» прошёл и список, и модерацию
+// текста — рецензент 25.11, Gemini), а рецензент смотрит на картинку.
+// Обычная реклама в портфолио X5 (109 картинок): sexual ≤ 0.01, флагов нет.
+const IMAGE_BLOCK_CATEGORIES = ["sexual", "violence/graphic"];
+
+export async function isImageFlagged(
+  images: Array<{ base64: string; mimeType: string }>,
+  apiKey: string | undefined,
+  fetchImpl: typeof fetch = fetch,
+): Promise<boolean> {
+  if (!apiKey || images.length === 0) return false;
+  const verdicts = await Promise.all(images.map(async (image) => {
+    try {
+      const response = await fetchImpl(MODERATION_URL, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "omni-moderation-latest",
+          input: [{
+            type: "image_url",
+            image_url: { url: `data:${image.mimeType};base64,${image.base64}` },
+          }],
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!response.ok) {
+        console.warn(JSON.stringify({
+          event: "image_moderation_failed",
+          status: response.status,
+        }));
+        return false;
+      }
+      const payload = await response.json() as ModerationPayload;
+      const result = payload.results?.[0];
+      const hits = IMAGE_BLOCK_CATEGORIES.filter((name) =>
+        result?.categories?.[name] === true
+      );
+      console.log(JSON.stringify({
+        event: "image_moderation",
+        blocked: hits,
+        sexual:
+          Math.round(Number(result?.category_scores?.sexual || 0) * 1000) /
+          1000,
+      }));
+      return hits.length > 0;
+    } catch (error) {
+      // сбой модерации генерацию не ломает — как у текста
+      console.warn(JSON.stringify({
+        event: "image_moderation_failed",
+        reason: error instanceof Error ? error.name : "unknown",
+      }));
+      return false;
+    }
+  }));
+  return verdicts.some(Boolean);
+}
 
 export async function isPromptFlagged(
   text: string | null | undefined,

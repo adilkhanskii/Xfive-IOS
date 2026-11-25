@@ -18,6 +18,10 @@ const BLOCKED: RegExp[] = [
   new RegExp(`${L}(less|fewer) (clothes|clothing)(?![\\p{L}])|${L}show(s|ing)? (some |more |a lot of )?skin(?![\\p{L}])(?! ?(care|cream|tone|type|texture|product|routine))|${L}bare[- ](chest|chested|breasts?|butt)(?![\\p{L}])`, 'iu'),
   new RegExp(`${L}(make|makes|making|made) (her|him|them|the \\p{L}+) (look )?(hotter|sexier|more revealing|more seductive)(?![\\p{L}])`, 'iu'),
   new RegExp(`${L}(revealing (everything|it all|all of (her|him)|(her|his|the) body|body)|(everything|what'?s|what is) underneath|(remove|removes|removing|take off|takes off|taking off|pull off|pull down|lift) (the )?(cloth|fabric|towel|sheet|blanket|covering|cover|garment|wrap)s? (from|off) (the |her |his )?(woman|girl|man|lady|model|person|body|her|him))(?![\\p{L}])`, 'iu'),
+  // «Have the woman wear nothing but a necklace» — рецензент 25.11, прошло после v69 (Gemini)
+  // «wearing nothing but black» (мода) и бельё как товар не трогаем
+  new RegExp(`${L}((wear|wears|wearing|wore|in|dressed in|clad in) nothing but (a |an |her |his |their |some )?(necklace|jewel\\p{L}*|pearls?|chains?|towels?|sheets?|blankets?|heels|high heels|stockings|tie|smile|hats?|shoes|boots|socks|gloves|ribbons?|bows?|body ?paint|apron|scarf|robe|sunglasses|watch|earrings|bracelets?|crown|leaves|flowers|tattoos?)|(wear|wears|wearing|wore) nothing(?! (but|fancy|special|flashy|bright|loud|else|formal|new))(?![\\p{L}]))(?![\\p{L}])`, 'iu'),
+  new RegExp(`${L}((ничего|ничё|ничо) кроме|только в|в одн(ом|ой|их)) (ожерель|колье|украшени|бус|цепочк|полотенц|простын|покрывал|чулк|туфл|каблук|галстук|шарф|фартук|шляп|татуир|цвет)\\p{L}*|${L}без ничего(?![\\p{L}])`, 'iu'),
   // русский / казахский (корни)
   // «пошлина» не задеваем: только формы «пошлый/пошлая/пошлость»
   new RegExp(`${L}(голы[йеях]|гол(ая|ую|ой)|обнаж\\p{L}*|раздет\\p{L}*|раздень\\p{L}*|раздеть\\p{L}*|порн\\p{L}*|секс\\p{L}*|эрот\\p{L}*|сиськ\\p{L}*|пошл(ый|ая|ое|ые|ого|ую|ост\\p{L}*|ятин\\p{L}*)|похаб\\p{L}*|стриптиз\\p{L}*|без одежды|жалаңаш\\p{L}*)`, 'iu'),
