@@ -27,7 +27,7 @@ import {
   shouldRetryGoogleWithNextKey,
 } from "./economy.mjs";
 import { isPromptBlocked } from "./promptSafety.ts";
-import { isPromptFlagged } from "./moderation.ts";
+import { isImageFlagged, isPromptFlagged } from "./moderation.ts";
 
 const OPENAI_URL = "https://api.openai.com/v1/images/generations";
 const OPENAI_EDIT_URL = "https://api.openai.com/v1/images/edits";
@@ -352,6 +352,23 @@ Deno.serve(async (req) => {
         normalized.quantity,
         normalized.size,
         normalized.transparentBackground,
+      );
+    }
+
+    // 18+ на готовой картинке не отдаём: ошибка уходит в catch ниже —
+    // кредиты вернутся, модель не выключится, клиенту 422 content_rejected.
+    if (
+      await isImageFlagged(
+        imageBase64s.map((base64) => ({
+          base64,
+          mimeType: detectGeneratedImageFormat(base64).mimeType,
+        })),
+        getProviderKeys("gpt")[0],
+      )
+    ) {
+      throw Object.assign(
+        new Error("Generated image rejected by the safety system"),
+        { status: 422, code: "moderation_blocked" },
       );
     }
 

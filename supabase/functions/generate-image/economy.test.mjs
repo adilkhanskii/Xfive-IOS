@@ -617,3 +617,45 @@ test("moderation blocks flagged sexual prompts and fails open", async () => {
     false,
   );
 });
+
+test("image moderation blocks sexual results and fails open", async () => {
+  const { isImageFlagged } = await import("./moderation.ts");
+  const { isProviderSafetyRejection } = await import("./economy.mjs");
+  const reply = (body, status = 200) => () =>
+    Promise.resolve(new Response(JSON.stringify(body), { status }));
+  const image = [{ base64: "aGk=", mimeType: "image/png" }];
+  const sexual = reply({
+    results: [{
+      flagged: true,
+      categories: { sexual: true },
+      category_scores: { sexual: 0.93 },
+    }],
+  });
+  const violenceOnly = reply({
+    results: [{ flagged: true, categories: { violence: true } }],
+  });
+  const clean = reply({
+    results: [{ flagged: false, categories: {}, category_scores: { sexual: 0.01 } }],
+  });
+  let sentBody = "";
+  const capture = (_url, init) => {
+    sentBody = String(init.body);
+    return clean();
+  };
+  assert.equal(await isImageFlagged(image, "key", sexual), true);
+  assert.equal(await isImageFlagged(image, "key", violenceOnly), false);
+  assert.equal(await isImageFlagged(image, "key", capture), false);
+  assert.match(sentBody, /data:image\/png;base64,aGk=/);
+  assert.equal(await isImageFlagged(image, "key", reply({}, 500)), false);
+  assert.equal(
+    await isImageFlagged(image, "key", () => Promise.reject(new Error("net"))),
+    false,
+  );
+  assert.equal(await isImageFlagged(image, undefined, sexual), false);
+  assert.equal(await isImageFlagged([], "key", sexual), false);
+  // одна из нескольких картинок 18+ — блокируем весь ответ
+  let call = 0;
+  const secondBad = () => (call++ === 1 ? sexual() : clean());
+  assert.equal(await isImageFlagged([...image, ...image], "key", secondBad), true);
+  assert.equal(isProviderSafetyRejection(422, "", "moderation_blocked"), true);
+});
