@@ -17,6 +17,7 @@ const BLOCKED: RegExp[] = [
   new RegExp(`${L}(take|takes|took|taking|remove|removes|removed|removing) (off )?(her|his|their|all)( \\p{L}+)? (clothes|clothing|top|shirt|t-?shirt|blouse|bra|dress|bikini|swimsuit|underwear|panties|skirt)(?![\\p{L}])`, 'iu'),
   new RegExp(`${L}(less|fewer) (clothes|clothing)(?![\\p{L}])|${L}show(s|ing)? (some |more |a lot of )?skin(?![\\p{L}])(?! ?(care|cream|tone|type|texture|product|routine))|${L}bare[- ](chest|chested|breasts?|butt)(?![\\p{L}])`, 'iu'),
   new RegExp(`${L}(make|makes|making|made) (her|him|them|the \\p{L}+) (look )?(hotter|sexier|more revealing|more seductive)(?![\\p{L}])`, 'iu'),
+  new RegExp(`${L}(revealing (everything|it all|all of (her|him)|(her|his|the) body|body)|(everything|what'?s|what is) underneath|(remove|removes|removing|take off|takes off|taking off|pull off|pull down|lift) (the )?(cloth|fabric|towel|sheet|blanket|covering|cover|garment|wrap)s? (from|off) (the |her |his )?(woman|girl|man|lady|model|person|body|her|him))(?![\\p{L}])`, 'iu'),
   // русский / казахский (корни)
   // «пошлина» не задеваем: только формы «пошлый/пошлая/пошлость»
   new RegExp(`${L}(голы[йеях]|гол(ая|ую|ой)|обнаж\\p{L}*|раздет\\p{L}*|раздень\\p{L}*|раздеть\\p{L}*|порн\\p{L}*|секс\\p{L}*|эрот\\p{L}*|сиськ\\p{L}*|пошл(ый|ая|ое|ые|ого|ую|ост\\p{L}*|ятин\\p{L}*)|похаб\\p{L}*|стриптиз\\p{L}*|без одежды|жалаңаш\\p{L}*)`, 'iu'),
