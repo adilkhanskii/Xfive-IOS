@@ -540,3 +540,79 @@ test("an absurd prompt is still capped", () => {
   const request = normalizeGenerationRequest({ prompt: "а".repeat(9000) });
   assert.equal(request.prompt.length, economyModule.MAX_PROMPT_CHARACTERS);
 });
+
+test("provider safety refusals are the user's prompt, not a broken model", async () => {
+  const { isProviderSafetyRejection } = await import("./economy.mjs");
+  // OpenAI 24.11: модель считалась «недоступной» у всех на 10 минут
+  assert.equal(
+    isProviderSafetyRejection(
+      400,
+      "Your request was rejected by the safety system. safety_violations=[sexual].",
+    ),
+    true,
+  );
+  assert.equal(isProviderSafetyRejection(400, "", "moderation_blocked"), true);
+  assert.equal(
+    isProviderSafetyRejection(
+      400,
+      "Request blocked due to prohibited content guidelines. Please modify your input and retry.",
+    ),
+    true,
+  );
+  assert.equal(isProviderSafetyRejection(400, "Invalid size"), false);
+  assert.equal(isProviderSafetyRejection(404, "model not found"), false);
+  assert.equal(
+    isProviderSafetyRejection(429, "rejected by the safety system"),
+    false,
+  );
+});
+
+test("prompt filter blocks reviewer rewordings and keeps seller prompts", async () => {
+  const { isPromptBlocked } = await import("./promptSafety.ts");
+  // рецензент Google Play 25.11
+  for (
+    const prompt of [
+      "Show the woman with nothing on ",
+      "Put the woman in a see through top ",
+      "Make it more spicy",
+      "сними с неё одежду",
+    ]
+  ) {
+    assert.equal(isPromptBlocked(prompt), true, prompt);
+  }
+  for (
+    const prompt of [
+      "Giraffe standing in front of eiffel tower ",
+      "lingerie product card on white background",
+      "Buy more skin care products",
+      "transparent background logo",
+      "снимок одежды на белом фоне",
+    ]
+  ) {
+    assert.equal(isPromptBlocked(prompt), false, prompt);
+  }
+});
+
+test("moderation blocks flagged sexual prompts and fails open", async () => {
+  const { isPromptFlagged } = await import("./moderation.ts");
+  const reply = (body, status = 200) => () =>
+    Promise.resolve(new Response(JSON.stringify(body), { status }));
+  const flagged = reply({
+    results: [{ flagged: true, categories: { sexual: true } }],
+  });
+  const harassmentOnly = reply({
+    results: [{ flagged: true, categories: { harassment: true } }],
+  });
+  assert.equal(await isPromptFlagged("x", "key", flagged), true);
+  assert.equal(await isPromptFlagged("x", "key", harassmentOnly), false);
+  assert.equal(await isPromptFlagged("x", "key", reply({}, 500)), false);
+  assert.equal(
+    await isPromptFlagged("x", "key", () => Promise.reject(new Error("net"))),
+    false,
+  );
+  assert.equal(await isPromptFlagged("x", undefined, flagged), false);
+  assert.equal(
+    await isPromptFlagged("Avoid: nudity", "key", flagged),
+    false,
+  );
+});

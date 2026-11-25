@@ -364,6 +364,19 @@ export function shouldFallbackGoogleToGPT(status) {
     status >= 500;
 }
 
+// Отказ модерации провайдера (OpenAI «safety system», Google «prohibited
+// content») — это запрещённый запрос пользователя, а не поломка модели:
+// здоровье провайдера не трогаем (иначе модель «недоступна» у всех на 10 мин,
+// 24.11) и на GPT не переключаемся.
+const PROVIDER_SAFETY_MESSAGE =
+  /rejected by the safety system|safety_violations|moderation_blocked|prohibited content|content_policy_violation/i;
+
+export function isProviderSafetyRejection(status, message = "", code = "") {
+  if (String(code || "") === "moderation_blocked") return true;
+  if (status !== 400 && status !== 422) return false;
+  return PROVIDER_SAFETY_MESSAGE.test(String(message || ""));
+}
+
 export async function buildGenerationIdentity(
   normalized,
   body = {},
